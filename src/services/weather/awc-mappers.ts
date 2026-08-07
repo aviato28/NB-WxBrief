@@ -210,6 +210,9 @@ export interface AwcSigmetJson {
   readonly coords?: ReadonlyArray<{ lat: number; lon: number }> | null;
   readonly base?: number | null;
   readonly top?: number | null;
+  /** US domestic airsigmet altitudes are feet MSL. */
+  readonly altitudeLow1?: number | null;
+  readonly altitudeHi1?: number | null;
   readonly airSigmetType?: string;
 }
 
@@ -325,6 +328,16 @@ function mapHazard(raw: string | null | undefined): SigmetHazard {
   }
 }
 
+function feetToFlightLevelLabel(feet: number | null | undefined): string | null {
+  if (feet === null || feet === undefined || Number.isNaN(feet)) {
+    return null;
+  }
+  if (feet <= 0) {
+    return "SFC";
+  }
+  return `FL${String(Math.round(feet / 100)).padStart(3, "0")}`;
+}
+
 export function mapAwcSigmet(raw: AwcSigmetJson, index: number): Sigmet {
   const text = raw.rawSigmet ?? raw.rawAirSigmet ?? "";
   const hazard = mapHazard(raw.hazard);
@@ -335,16 +348,22 @@ export function mapAwcSigmet(raw: AwcSigmetJson, index: number): Sigmet {
         ? "MOD"
         : "UNKNOWN";
 
+  const series =
+    raw.seriesId !== undefined && raw.seriesId !== null
+      ? String(raw.seriesId)
+      : String(index);
+
   const id = [
     raw.firId ?? raw.icaoId ?? "SIG",
-    raw.seriesId ?? index,
+    series,
     raw.validTimeFrom ?? index,
   ].join("-");
 
-  const baseLabel =
-    raw.base !== null && raw.base !== undefined ? `FL${Math.round(raw.base / 100)}` : "SFC";
-  const topLabel =
-    raw.top !== null && raw.top !== undefined ? `FL${Math.round(raw.top / 100)}` : "UNK";
+  const baseFeet = raw.base ?? raw.altitudeLow1 ?? null;
+  const topFeet = raw.top ?? raw.altitudeHi1 ?? null;
+  const baseLabel = feetToFlightLevelLabel(baseFeet) ?? "SFC";
+  const topLabel = feetToFlightLevelLabel(topFeet) ?? "UNK";
+  const region = raw.firName ?? raw.firId ?? raw.icaoId ?? "area";
 
   return {
     id,
@@ -354,7 +373,7 @@ export function mapAwcSigmet(raw: AwcSigmetJson, index: number): Sigmet {
     validFrom: unixSecondsToIso(raw.validTimeFrom),
     validTo: unixSecondsToIso(raw.validTimeTo),
     firs: raw.firId ? [raw.firId] : [],
-    summary: `${hazard}${raw.qualifier ? ` ${raw.qualifier}` : ""} ${raw.firName ?? raw.firId ?? ""} ${baseLabel}/${topLabel}`.trim(),
+    summary: `${hazard}${raw.qualifier ? ` ${raw.qualifier}` : ""} ${series} · ${region} · ${baseLabel}/${topLabel}`,
     polygon:
       raw.coords?.map((coord) => ({
         latitude: coord.lat,
