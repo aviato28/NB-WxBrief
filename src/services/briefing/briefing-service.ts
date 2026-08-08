@@ -195,7 +195,7 @@ export class BriefingService {
           flightLevel: request.flightLevel,
           departureTimeUtc: request.departureTimeUtc,
           routeDistanceNm: Math.round(route.totalDistanceNm),
-          estimatedAirway: route.fixes.map((fix) => fix.name).join(" "),
+          estimatedAirway: route.resolvedRouteText || route.fixes.map((fix) => fix.name).join(" "),
           generatedAt,
         },
         route,

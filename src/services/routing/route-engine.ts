@@ -1,12 +1,13 @@
 import type { Airport } from "@/domain/models/airport";
 import type { ParsedRoute, RouteFix } from "@/domain/models/route";
 import {
+  attachViaAirways,
   buildLegsAndSamples,
+  classifyAtcRouteTokens,
   createRouteFix,
   estimateUnresolvedFixes,
-  isLikelyAirwayDesignator,
+  formatResolvedRouteText,
   parseLatLonToken,
-  tokenizeAtcRoute,
 } from "@/lib/geo";
 import type { AirportProvider } from "@/services/providers/airports/airport-provider";
 import { AwcNavProvider } from "@/services/routing/awc-nav-provider";
@@ -14,7 +15,9 @@ import { LocalNavaidProvider } from "@/services/routing/local-navaid-provider";
 
 /**
  * Resolves the filed ATC route into a flyable waypoint sequence.
- * Never collapses to a single departure→destination great-circle.
+ * Airways are retained on the structured token list and attached to outbound
+ * legs (`viaAirway`); geometry is still fix-to-fix great-circle until an
+ * airway centerline database is available.
  */
 export class RouteEngine {
   constructor(
@@ -28,29 +31,38 @@ export class RouteEngine {
     departure: Airport,
     destination: Airport,
   ): Promise<ParsedRoute> {
-    const tokens = tokenizeAtcRoute(rawRoute).filter(
-      (token) => !isLikelyAirwayDesignator(token),
+    const filedTokens = classifyAtcRouteTokens(rawRoute);
+
+    // Geographic / procedure tokens only — airways stay on filedTokens.
+    const geoTokens = filedTokens.filter(
+      (token) =>
+        token.kind !== "airway" &&
+        token.kind !== "direct" &&
+        token.kind !== "unknown",
     );
 
     // Drop leading/trailing airport duplicates if crew included them in the route string.
-    const filtered = tokens.filter(
+    const filtered = geoTokens.filter(
       (token, index) =>
         !(
-          (index === 0 && token === departure.icao) ||
-          (index === tokens.length - 1 && token === destination.icao)
+          (index === 0 && token.raw === departure.icao) ||
+          (index === geoTokens.length - 1 && token.raw === destination.icao)
         ),
     );
 
-    const fiveLetter = filtered.filter(
-      (token) =>
-        !parseLatLonToken(token) && token.length === 5 && /^[A-Z]+$/.test(token),
-    );
+    const fiveLetter = filtered
+      .map((token) => token.raw)
+      .filter(
+        (token) =>
+          !parseLatLonToken(token) && token.length === 5 && /^[A-Z]+$/.test(token),
+      );
     const fixLookups = await this.nav.lookupManyFixes(fiveLetter);
 
     const middle: RouteFix[] = [];
     for (let index = 0; index < filtered.length; index += 1) {
-      const token = filtered[index];
-      if (!token) continue;
+      const entry = filtered[index];
+      if (!entry) continue;
+      const token = entry.raw;
 
       const latlon = parseLatLonToken(token);
       if (latlon) {
@@ -98,7 +110,7 @@ export class RouteEngine {
         }
       }
 
-      // US 3-letter airway tokens often coincide with Kxxx airports (LAS→KLAS).
+      // US 3-letter tokens often coincide with Kxxx airports (LAS→KLAS).
       if (token.length === 3) {
         const kAirport = await this.airports.lookup(`K${token}`);
         if (kAirport) {
@@ -120,6 +132,12 @@ export class RouteEngine {
         }
       }
 
+      // SID/STAR procedure name — keep visible; estimate position between neighbors.
+      if (entry.kind === "procedure") {
+        middle.push(createRouteFix(token, index + 1, null, "procedure"));
+        continue;
+      }
+
       middle.push(createRouteFix(token, index + 1, null, "unresolved"));
     }
 
@@ -135,13 +153,21 @@ export class RouteEngine {
     ];
 
     const estimated = estimateUnresolvedFixes(sequence);
-    const geometry = buildLegsAndSamples(estimated);
+    const withAirways = attachViaAirways(estimated, filedTokens);
+    const geometry = buildLegsAndSamples(withAirways);
 
     return {
       raw: rawRoute.trim(),
-      fixes: estimated,
-      unresolvedFixNames: estimated
-        .filter((fix) => fix.kind === "estimated")
+      filedTokens,
+      resolvedRouteText: formatResolvedRouteText(filedTokens),
+      fixes: withAirways,
+      unresolvedFixNames: withAirways
+        .filter(
+          (fix) =>
+            fix.kind === "estimated" ||
+            fix.kind === "unresolved" ||
+            fix.kind === "procedure",
+        )
         .map((fix) => fix.name),
       ...geometry,
     };

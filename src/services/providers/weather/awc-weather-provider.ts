@@ -208,6 +208,8 @@ export class AwcWeatherProvider implements WeatherProvider {
 
     const emptyRoute: ParsedRoute = {
       raw: query.routeText,
+      filedTokens: [],
+      resolvedRouteText: query.routeText,
       fixes: [],
       pathPoints: routePoints,
       greatCirclePoints: routePoints,

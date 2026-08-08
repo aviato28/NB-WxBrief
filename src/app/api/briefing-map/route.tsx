@@ -1,4 +1,4 @@
-import { ImageResponse } from "next/og";
+import sharp from "sharp";
 import type { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
@@ -63,7 +63,15 @@ function turbColor(intensity: string): string {
   }
 }
 
-async function tileToDataUrl(url: string): Promise<string | null> {
+function esc(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+async function fetchTileBuffer(url: string): Promise<Buffer | null> {
   try {
     const res = await fetch(url, {
       headers: {
@@ -75,47 +83,17 @@ async function tileToDataUrl(url: string): Promise<string | null> {
     });
     if (!res.ok) return null;
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength < 64) return null;
-    const ct = res.headers.get("content-type") ?? "image/png";
-    return `data:${ct};base64,${buf.toString("base64")}`;
+    return buf.byteLength < 64 ? null : buf;
   } catch {
     return null;
   }
 }
 
 /**
- * Densify the filed path into screen-space dots.
- * Satori mishandles CSS rotate/transformOrigin vs absolute HTML tiles, which
- * previously drew the route south of the waypoint labels — no transforms here.
+ * Build the PDF route chart with sharp — tiles + a single SVG overlay.
+ * Avoids next/og (Satori), which previously misaligned HTML/SVG layers so the
+ * navy route and waypoint markers did not share the same screen positions.
  */
-function densifyRoutePixels(
-  path: readonly MapPoint[],
-  project: (lat: number, lon: number) => { x: number; y: number },
-  spacingPx = 5,
-): Array<{ key: string; x: number; y: number }> {
-  const dots: Array<{ key: string; x: number; y: number }> = [];
-  let n = 0;
-  for (let i = 0; i < path.length - 1; i += 1) {
-    const a = path[i];
-    const b = path[i + 1];
-    if (!a || !b) continue;
-    const p0 = project(a.lat, a.lon);
-    const p1 = project(b.lat, b.lon);
-    const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
-    const steps = Math.max(1, Math.ceil(dist / spacingPx));
-    for (let s = 0; s <= steps; s += 1) {
-      const t = s / steps;
-      dots.push({
-        key: `rp-${n}`,
-        x: p0.x + (p1.x - p0.x) * t,
-        y: p0.y + (p1.y - p0.y) * t,
-      });
-      n += 1;
-    }
-  }
-  return dots;
-}
-
 export async function POST(request: NextRequest): Promise<Response> {
   let body: MapRequestBody;
   try {
@@ -129,8 +107,17 @@ export async function POST(request: NextRequest): Promise<Response> {
     return new Response("path requires >= 2 points", { status: 400 });
   }
 
-  const lats = path.map((p) => p.lat);
-  const lons = path.map((p) => p.lon);
+  const fixes = body.fixes ?? [];
+  const turbulence = body.turbulence ?? [];
+  const sigmets = body.sigmets ?? [];
+
+  // Fit viewport to the union of path + labeled fixes so markers stay on-chart.
+  const allPoints: MapPoint[] = [
+    ...path,
+    ...fixes.map((f) => ({ lat: f.lat, lon: f.lon })),
+  ];
+  const lats = allPoints.map((p) => p.lat);
+  const lons = allPoints.map((p) => p.lon);
   const minLat = Math.min(...lats);
   const maxLat = Math.max(...lats);
   const minLon = Math.min(...lons);
@@ -162,7 +149,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const tileMinY = Math.floor(centerY - HEIGHT / 2 / 256) - 1;
   const tileMaxY = Math.ceil(centerY + HEIGHT / 2 / 256) + 1;
 
-  type TileSpec = {
+  type TileJob = {
     key: string;
     url: string;
     left: number;
@@ -170,7 +157,7 @@ export async function POST(request: NextRequest): Promise<Response> {
     opacity: number;
   };
 
-  const specs: TileSpec[] = [];
+  const jobs: TileJob[] = [];
   for (let ty = tileMinY; ty <= tileMaxY; ty += 1) {
     for (let tx = tileMinX; tx <= tileMaxX; tx += 1) {
       const wrappedX = ((tx % maxIndex) + maxIndex) % maxIndex;
@@ -180,7 +167,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       if (left > WIDTH || top > HEIGHT || left + 256 < 0 || top + 256 < 0) {
         continue;
       }
-      specs.push({
+      jobs.push({
         key: `b-${zoom}-${wrappedX}-${ty}`,
         url: `${BASEMAP}/${zoom}/${wrappedX}/${ty}.png`,
         left,
@@ -188,7 +175,7 @@ export async function POST(request: NextRequest): Promise<Response> {
         opacity: 1,
       });
       if (body.radarTileUrl) {
-        specs.push({
+        jobs.push({
           key: `r-${zoom}-${wrappedX}-${ty}`,
           url: body.radarTileUrl
             .replace("{z}", String(zoom))
@@ -202,172 +189,114 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
-  const limited = specs
+  const limited = jobs
     .filter((t) => t.key.startsWith("b-"))
     .slice(0, 48)
-    .concat(specs.filter((t) => t.key.startsWith("r-")).slice(0, 24));
+    .concat(jobs.filter((t) => t.key.startsWith("r-")).slice(0, 24));
 
   const fetched = await Promise.all(
     limited.map(async (tile) => {
-      const dataUrl = await tileToDataUrl(tile.url);
-      return dataUrl ? { ...tile, dataUrl } : null;
+      const buf = await fetchTileBuffer(tile.url);
+      return buf ? { ...tile, buf } : null;
     }),
   );
   const tiles = fetched.filter(
-    (t): t is TileSpec & { dataUrl: string } => t !== null,
+    (t): t is TileJob & { buf: Buffer } => t !== null,
   );
 
-  const fixes = body.fixes ?? [];
-  const turbulence = body.turbulence ?? [];
-  const routeDots = densifyRoutePixels(path, project, 7);
+  const base = sharp({
+    create: {
+      width: WIDTH,
+      height: HEIGHT,
+      channels: 3,
+      background: { r: 217, g: 230, b: 242 },
+    },
+  });
 
-  // Endpoint fixes for stronger markers
+  const composites: sharp.OverlayOptions[] = [];
+  for (const tile of tiles) {
+    const left = Math.round(tile.left);
+    const top = Math.round(tile.top);
+    // Radar tiles: soft blend by reducing opacity via sharp ensureAlpha + linear.
+    if (tile.opacity < 1) {
+      const faded = await sharp(tile.buf)
+        .ensureAlpha(tile.opacity)
+        .png()
+        .toBuffer();
+      composites.push({ input: faded, left, top });
+    } else {
+      composites.push({ input: tile.buf, left, top });
+    }
+  }
+
+  // Draw route + markers in ONE SVG so path and points share the same pixel space.
+  const projectedPath = path.map((p) => project(p.lat, p.lon));
+  const routeD = projectedPath
+    .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
+
   const endpoints = new Set(
     [fixes[0]?.name, fixes[fixes.length - 1]?.name].filter(Boolean),
   );
 
-  return new ImageResponse(
-    (
-      <div
-        style={{
-          width: WIDTH,
-          height: HEIGHT,
-          display: "flex",
-          position: "relative",
-          backgroundColor: "#d9e6f2",
-          overflow: "hidden",
-        }}
-      >
-        {tiles.map((tile) => (
-          // next/og ImageResponse requires raw <img> for tile bitmaps
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            key={tile.key}
-            alt=""
-            src={tile.dataUrl}
-            width={256}
-            height={256}
-            style={{
-              position: "absolute",
-              left: tile.left,
-              top: tile.top,
-              opacity: tile.opacity,
-            }}
-          />
-        ))}
+  const sigmetPaths = sigmets
+    .filter((s) => s.points.length >= 3)
+    .map((s, index) => {
+      const d =
+        s.points
+          .map((p, i) => {
+            const xy = project(p.lat, p.lon);
+            return `${i === 0 ? "M" : "L"}${xy.x.toFixed(1)} ${xy.y.toFixed(1)}`;
+          })
+          .join(" ") + " Z";
+      const color = s.hazard === "CONVECTIVE" ? "#ea580c" : "#ca8a04";
+      return `<path key="s${index}" d="${d}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.5"/>`;
+    })
+    .join("");
 
-        {/* Route — densified dots (no CSS rotate; Satori misaligned transforms) */}
-        {routeDots.map((dot) => (
-          <div
-            key={`route-${dot.key}`}
-            style={{
-              position: "absolute",
-              left: dot.x - 4,
-              top: dot.y - 4,
-              width: 8,
-              height: 8,
-              borderRadius: 8,
-              backgroundColor: "#0b4f8a",
-              border: "2px solid #ffffff",
-              display: "flex",
-            }}
-          />
-        ))}
+  const turbCircles = turbulence
+    .map((t) => {
+      const xy = project(t.lat, t.lon);
+      const r = t.intensity === "NONE" ? 5 : t.intensity === "LIGHT" ? 7 : 9;
+      return `<circle cx="${xy.x.toFixed(1)}" cy="${xy.y.toFixed(1)}" r="${r}" fill="${turbColor(t.intensity)}" stroke="#0b1524" stroke-width="1.5"/>`;
+    })
+    .join("");
 
-        {/* Turbulence intensity dots (legend colors) */}
-        {turbulence.map((t, index) => {
-          const xy = project(t.lat, t.lon);
-          const size = t.intensity === "NONE" ? 10 : t.intensity === "LIGHT" ? 14 : 18;
-          return (
-            <div
-              key={`t-${index}`}
-              style={{
-                position: "absolute",
-                left: xy.x - size / 2,
-                top: xy.y - size / 2,
-                width: size,
-                height: size,
-                borderRadius: size,
-                backgroundColor: turbColor(t.intensity),
-                border: "2px solid #0b1524",
-                display: "flex",
-              }}
-            />
-          );
-        })}
+  const fixMarks = fixes
+    .map((fix) => {
+      const xy = project(fix.lat, fix.lon);
+      const isEnd = endpoints.has(fix.name);
+      const r = isEnd ? 7 : 5;
+      const fill = isEnd ? "#b45309" : "#0ea5e9";
+      const shape = isEnd
+        ? `<rect x="${(xy.x - r).toFixed(1)}" y="${(xy.y - r).toFixed(1)}" width="${r * 2}" height="${r * 2}" fill="${fill}" stroke="#0b1524" stroke-width="1.5"/>`
+        : `<circle cx="${xy.x.toFixed(1)}" cy="${xy.y.toFixed(1)}" r="${r}" fill="${fill}" stroke="#0b1524" stroke-width="1.5"/>`;
+      const label = `<text x="${(xy.x + 10).toFixed(1)}" y="${(xy.y - 8).toFixed(1)}" fill="#0b1524" font-size="18" font-family="Helvetica, Arial, sans-serif" font-weight="700">${esc(fix.name)}</text>`;
+      return `${shape}${label}`;
+    })
+    .join("");
 
-        {/* Waypoint markers — cyan/amber, not turbulence colors */}
-        {fixes.map((fix) => {
-          const xy = project(fix.lat, fix.lon);
-          const isEnd = endpoints.has(fix.name);
-          const size = isEnd ? 14 : 10;
-          return (
-            <div
-              key={`dot-${fix.name}`}
-              style={{
-                position: "absolute",
-                left: xy.x - size / 2,
-                top: xy.y - size / 2,
-                width: size,
-                height: size,
-                borderRadius: isEnd ? 2 : size,
-                backgroundColor: isEnd ? "#b45309" : "#0ea5e9",
-                border: "2px solid #0b1524",
-                display: "flex",
-              }}
-            />
-          );
-        })}
+  const overlaySvg = Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
+<svg width="${WIDTH}" height="${HEIGHT}" viewBox="0 0 ${WIDTH} ${HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+  ${sigmetPaths}
+  <path d="${routeD}" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="${routeD}" fill="none" stroke="#0b4f8a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  ${turbCircles}
+  ${fixMarks}
+  <rect x="16" y="${HEIGHT - 70}" width="520" height="54" rx="4" fill="white" fill-opacity="0.92"/>
+  <text x="28" y="${HEIGHT - 42}" fill="#334155" font-size="16" font-family="Helvetica, Arial, sans-serif">NB-WxBrief · CARTO basemap · filed route</text>
+  <text x="28" y="${HEIGHT - 22}" fill="#64748b" font-size="14" font-family="Helvetica, Arial, sans-serif">Cyan/amber markers = waypoints · colored dots = turbulence (advisory)</text>
+</svg>`);
 
-        {fixes.map((fix) => {
-          const xy = project(fix.lat, fix.lon);
-          return (
-            <div
-              key={`label-${fix.name}`}
-              style={{
-                position: "absolute",
-                left: xy.x + 10,
-                top: xy.y - 14,
-                display: "flex",
-                color: "#0b1524",
-                fontSize: 18,
-                fontFamily: "Helvetica",
-                fontWeight: 700,
-              }}
-            >
-              {fix.name}
-            </div>
-          );
-        })}
+  composites.push({ input: overlaySvg, left: 0, top: 0 });
 
-        <div
-          style={{
-            position: "absolute",
-            left: 16,
-            bottom: 16,
-            display: "flex",
-            flexDirection: "column",
-            backgroundColor: "rgba(255,255,255,0.92)",
-            color: "#334155",
-            fontSize: 16,
-            padding: "10px 14px",
-          }}
-        >
-          <div style={{ display: "flex" }}>
-            NB-WxBrief · CARTO basemap · filed route
-          </div>
-          <div style={{ display: "flex", marginTop: 4, fontSize: 14, color: "#64748b" }}>
-            Cyan/amber markers = waypoints · colored dots = turbulence
-          </div>
-        </div>
-      </div>
-    ),
-    {
-      width: WIDTH,
-      height: HEIGHT,
-      headers: {
-        "Cache-Control": "no-store",
-      },
+  const png = await base.composite(composites).png().toBuffer();
+
+  return new Response(new Uint8Array(png), {
+    status: 200,
+    headers: {
+      "Content-Type": "image/png",
+      "Cache-Control": "no-store",
     },
-  );
+  });
 }

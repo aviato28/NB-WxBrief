@@ -64,11 +64,33 @@ export function FlightSummaryPanel({
           hint="UTC"
         />
       </div>
-      <div className="mt-4 space-y-2">
-        <p className="efb-label">ATC route</p>
-        <p className="efb-mono rounded-md border border-border/70 bg-muted/50 p-3">
-          {routeRaw}
-        </p>
+      <div className="mt-4 space-y-3">
+        <div className="space-y-2">
+          <p className="efb-label">ATC route (filed)</p>
+          <p className="efb-mono rounded-md border border-border/70 bg-muted/50 p-3">
+            {routeRaw}
+          </p>
+        </div>
+        {summary.estimatedAirway &&
+        summary.estimatedAirway.replace(/\s+/g, " ").trim() !==
+          routeRaw.replace(/\s+/g, " ").trim().toUpperCase() ? (
+          <div className="space-y-2">
+            <p className="efb-label">ATC route (parsed · airways kept)</p>
+            <p className="efb-mono rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+              {summary.estimatedAirway}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Airways (e.g. J60, UL9) are retained in the sequence. Map geometry
+              follows fix-to-fix great circles until airway centerlines are
+              available.
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Airways in the filed string (J/V/Q/T/U routes) are kept in the
+            parsed sequence — not stripped to waypoint IDs only.
+          </p>
+        )}
       </div>
     </section>
   );

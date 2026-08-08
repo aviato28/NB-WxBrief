@@ -54,11 +54,11 @@ function labeledIcon(name: string, accent: string): L.DivIcon {
   return L.divIcon({
     className: "nb-pdf-map-label",
     html: `<div style="display:flex;align-items:center;gap:4px;white-space:nowrap">
-      <span style="width:9px;height:9px;background:${accent};border:1px solid #e7ecf4;transform:rotate(45deg);display:inline-block;flex-shrink:0"></span>
+      <span style="width:9px;height:9px;border-radius:50%;background:${accent};border:1.5px solid #e7ecf4;display:inline-block;flex-shrink:0;box-sizing:border-box"></span>
       <span style="font:600 12px/1.1 Helvetica,Arial,sans-serif;color:#e7ecf4;text-shadow:0 1px 2px rgba(0,0,0,.9)">${name}</span>
     </div>`,
     iconSize: [100, 18],
-    iconAnchor: [4, 9],
+    iconAnchor: [5, 9],
   });
 }
 
@@ -187,10 +187,22 @@ async function captureViaApi(
   radarTileUrl: string | null,
 ): Promise<string | null> {
   try {
-    const path = briefing.route.pathPoints.map((p) => ({
-      lat: p.latitude,
-      lon: p.longitude,
-    }));
+    // Prefer densified filed path; always include fix vertices so the navy
+    // line is forced through every labeled waypoint (guards against any
+    // path/fix drift in upstream geometry).
+    const fixPoints = briefing.route.fixes
+      .filter((f) => f.coordinates)
+      .map((f) => ({
+        lat: f.coordinates!.latitude,
+        lon: f.coordinates!.longitude,
+      }));
+    const path =
+      briefing.route.pathPoints.length >= 2
+        ? briefing.route.pathPoints.map((p) => ({
+            lat: p.latitude,
+            lon: p.longitude,
+          }))
+        : fixPoints;
     const fixes = briefing.route.fixes
       .filter((f) => f.coordinates)
       .map((f) => ({
