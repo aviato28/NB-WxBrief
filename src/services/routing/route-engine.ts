@@ -10,6 +10,7 @@ import {
 } from "@/lib/geo";
 import type { AirportProvider } from "@/services/providers/airports/airport-provider";
 import { AwcNavProvider } from "@/services/routing/awc-nav-provider";
+import { LocalNavaidProvider } from "@/services/routing/local-navaid-provider";
 
 /**
  * Resolves the filed ATC route into a flyable waypoint sequence.
@@ -19,6 +20,7 @@ export class RouteEngine {
   constructor(
     private readonly airports: AirportProvider,
     private readonly nav: AwcNavProvider = new AwcNavProvider(),
+    private readonly localNavaids: LocalNavaidProvider = new LocalNavaidProvider(),
   ) {}
 
   async resolve(
@@ -39,11 +41,11 @@ export class RouteEngine {
         ),
     );
 
-    const fixLookups = await this.nav.lookupManyFixes(
-      filtered.filter(
-        (token) => !parseLatLonToken(token) && token.length >= 3 && token.length <= 5,
-      ),
+    const fiveLetter = filtered.filter(
+      (token) =>
+        !parseLatLonToken(token) && token.length === 5 && /^[A-Z]+$/.test(token),
     );
+    const fixLookups = await this.nav.lookupManyFixes(fiveLetter);
 
     const middle: RouteFix[] = [];
     for (let index = 0; index < filtered.length; index += 1) {
@@ -62,7 +64,23 @@ export class RouteEngine {
         continue;
       }
 
+      // Named oceanic / enroute fixes are often 5 letters — try individual AWC lookup
+      // when batch miss (e.g. partial AWC coverage).
+      if (token.length === 5) {
+        const single = await this.nav.lookupFix(token);
+        if (single) {
+          middle.push(createRouteFix(token, index + 1, single, "fix"));
+          continue;
+        }
+      }
+
       if (token.length === 3 || token.length === 4) {
+        const local = await this.localNavaids.lookup(token);
+        if (local) {
+          middle.push(createRouteFix(token, index + 1, local, "navaid"));
+          continue;
+        }
+
         const navaid = await this.nav.lookupNavaid(token);
         if (navaid) {
           middle.push(createRouteFix(token, index + 1, navaid, "navaid"));
@@ -75,6 +93,28 @@ export class RouteEngine {
         if (airport) {
           middle.push(
             createRouteFix(token, index + 1, airport.coordinates, "airport"),
+          );
+          continue;
+        }
+      }
+
+      // US 3-letter airway tokens often coincide with Kxxx airports (LAS→KLAS).
+      if (token.length === 3) {
+        const kAirport = await this.airports.lookup(`K${token}`);
+        if (kAirport) {
+          middle.push(
+            createRouteFix(token, index + 1, kAirport.coordinates, "airport"),
+          );
+          continue;
+        }
+
+        const iataHits = await this.airports.search(token, 4);
+        const exactIata = iataHits.find(
+          (airport) => airport.iata?.toUpperCase() === token,
+        );
+        if (exactIata) {
+          middle.push(
+            createRouteFix(token, index + 1, exactIata.coordinates, "airport"),
           );
           continue;
         }

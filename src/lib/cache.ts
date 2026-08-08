@@ -10,14 +10,27 @@ export class TtlCache {
 
   constructor(private readonly defaultTtlMs: number) {}
 
-  get<T>(key: string): T | null {
+  /** True when a non-expired entry exists (including cached `null`). */
+  has(key: string): boolean {
     const entry = this.store.get(key);
     if (!entry) {
-      return null;
+      return false;
     }
     if (Date.now() > entry.expiresAt) {
       this.store.delete(key);
-      return null;
+      return false;
+    }
+    return true;
+  }
+
+  get<T>(key: string): T | undefined {
+    const entry = this.store.get(key);
+    if (!entry) {
+      return undefined;
+    }
+    if (Date.now() > entry.expiresAt) {
+      this.store.delete(key);
+      return undefined;
     }
     return entry.value as T;
   }
@@ -34,9 +47,8 @@ export class TtlCache {
     loader: () => Promise<T>,
     ttlMs = this.defaultTtlMs,
   ): Promise<T> {
-    const cached = this.get<T>(key);
-    if (cached !== null) {
-      return cached;
+    if (this.has(key)) {
+      return this.get<T>(key) as T;
     }
     const value = await loader();
     this.set(key, value, ttlMs);

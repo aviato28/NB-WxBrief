@@ -26,7 +26,8 @@ export class AwcNavProvider {
     return upstreamCache.getOrSet(key, async () => {
       const payload = await fetchJsonSoft<AwcFixJson[]>({
         provider: "awc-fix",
-        url: `${AWC_BASE}/fix?ids=${encodeURIComponent(id)}&format=json`,
+        // Do not encode commas — AWC expects a raw comma-separated ids list.
+        url: `${AWC_BASE}/fix?ids=${id.toUpperCase()}&format=json`,
       });
       const hit = payload?.[0];
       if (!hit || !Number.isFinite(hit.lat) || !Number.isFinite(hit.lon)) {
@@ -41,7 +42,7 @@ export class AwcNavProvider {
     return upstreamCache.getOrSet(key, async () => {
       const payload = await fetchJsonSoft<AwcNavaidJson[]>({
         provider: "awc-navaid",
-        url: `${AWC_BASE}/navaid?ids=${encodeURIComponent(id)}&format=json`,
+        url: `${AWC_BASE}/navaid?ids=${id.toUpperCase()}&format=json`,
       });
       const hit = payload?.[0];
       if (!hit || !Number.isFinite(hit.lat) || !Number.isFinite(hit.lon)) {
@@ -56,33 +57,34 @@ export class AwcNavProvider {
   ): Promise<Map<string, GeoPoint>> {
     const unique = [...new Set(ids.map((id) => id.toUpperCase()))];
     const map = new Map<string, GeoPoint>();
-    // Batch in groups of 20 to respect AWC entry caps / URL length.
     const chunkSize = 20;
     for (let i = 0; i < unique.length; i += chunkSize) {
       const chunk = unique.slice(i, i + chunkSize);
       const unresolved: string[] = [];
       for (const id of chunk) {
-        const cached = upstreamCache.get<GeoPoint | null>(`fix:${id}`);
-        if (cached) {
-          map.set(id, cached);
-        } else if (cached === null) {
-          // negative cache
-        } else {
-          unresolved.push(id);
+        const key = `fix:${id}`;
+        if (upstreamCache.has(key)) {
+          const cached = upstreamCache.get<GeoPoint | null>(key);
+          if (cached) {
+            map.set(id, cached);
+          }
+          continue;
         }
+        unresolved.push(id);
       }
       if (unresolved.length === 0) continue;
 
       const payload = await fetchJsonSoft<AwcFixJson[]>({
         provider: "awc-fix",
-        url: `${AWC_BASE}/fix?ids=${encodeURIComponent(unresolved.join(","))}&format=json`,
+        url: `${AWC_BASE}/fix?ids=${unresolved.join(",")}&format=json`,
       });
       const found = new Set<string>();
       for (const item of payload ?? []) {
         const point = { latitude: item.lat, longitude: item.lon };
-        map.set(item.id.toUpperCase(), point);
-        upstreamCache.set(`fix:${item.id.toUpperCase()}`, point);
-        found.add(item.id.toUpperCase());
+        const id = item.id.toUpperCase();
+        map.set(id, point);
+        upstreamCache.set(`fix:${id}`, point);
+        found.add(id);
       }
       for (const id of unresolved) {
         if (!found.has(id)) {
