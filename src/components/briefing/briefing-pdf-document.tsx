@@ -1,11 +1,8 @@
 import React from "react";
 import {
   Document,
-  Image,
   Page,
-  Path,
   StyleSheet,
-  Svg,
   Text,
   View,
 } from "@react-pdf/renderer";
@@ -25,6 +22,8 @@ import {
   CONVECTIVE_LABELS,
   TURBULENCE_LABELS,
 } from "@/domain/constants/weather-styles";
+import { PdfBrandLockup } from "@/components/brand/pdf-logo";
+import { PdfVectorMap } from "@/components/briefing/pdf-vector-map";
 import {
   formatCeiling,
   formatFlightLevel,
@@ -338,39 +337,6 @@ const s = StyleSheet.create({
     color: mute,
     marginTop: 1,
   },
-  mapShell: {
-    borderWidth: 1,
-    borderColor: "#64748b",
-    marginBottom: 4,
-    backgroundColor: "#0b0e13",
-  },
-  mapImage: {
-    width: "100%",
-    height: 400,
-    objectFit: "cover",
-  },
-  mapFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    backgroundColor: soft,
-    borderTopWidth: 1,
-    borderTopColor: line,
-    paddingVertical: 4,
-    paddingHorizontal: 7,
-  },
-  mapFooterText: {
-    fontSize: 6,
-    color: mute,
-  },
-  mapMissing: {
-    height: 120,
-    backgroundColor: soft,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: line,
-    marginBottom: 6,
-  },
   airportCard: {
     borderWidth: 1,
     borderColor: line,
@@ -638,17 +604,6 @@ function Badge({
   );
 }
 
-function IconMark() {
-  return (
-    <Svg width={14} height={14} viewBox="0 0 24 24">
-      <Path
-        d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
-        fill="#94a3b8"
-      />
-    </Svg>
-  );
-}
-
 function AirportCard({
   role,
   airport,
@@ -750,7 +705,6 @@ function Footer({ generatedAt }: { readonly generatedAt: string }) {
 
 export function BriefingPdfDocument({
   briefing,
-  mapImageDataUrl,
 }: {
   readonly briefing: WeatherBriefing;
   readonly mapImageDataUrl?: string | null;
@@ -805,15 +759,7 @@ export function BriefingPdfDocument({
       <Page size="A4" style={s.page}>
         <View style={s.masthead}>
           <View style={s.mastTop}>
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <View style={{ marginRight: 7 }}>
-                <IconMark />
-              </View>
-              <View>
-                <Text style={s.brand}>{APP_NAME}</Text>
-                <Text style={s.brandSub}>Operational weather briefing</Text>
-              </View>
-            </View>
+            <PdfBrandLockup />
             <Text style={s.mastStamp}>
               {formatUtc(summary.generatedAt, "yyyy-MM-dd HH:mm")}Z
             </Text>
@@ -961,7 +907,7 @@ export function BriefingPdfDocument({
           <View style={s.section}>
             <Section
               title="5. Route weather map"
-              hint="Same operational map as the EFB display"
+              hint="Print-safe route chart with weather overlays"
             />
             <View style={s.legendRow}>
               {(
@@ -987,29 +933,7 @@ export function BriefingPdfDocument({
               })}
             </View>
 
-            {mapImageDataUrl ? (
-              <View style={s.mapShell} wrap={false}>
-                {/* react-pdf Image — not a DOM <img>; a11y rule does not apply */}
-                {/* eslint-disable-next-line jsx-a11y/alt-text */}
-                <Image src={mapImageDataUrl} style={s.mapImage} />
-                <View style={s.mapFooter}>
-                  <Text style={s.mapFooterText}>
-                    Filed waypoint route · radar · SIGMET · turbulence · cloud ·
-                    METAR stations · jet stream
-                  </Text>
-                  <Text style={s.mapFooterText}>
-                    {Math.round(summary.routeDistanceNm).toLocaleString()} NM ·{" "}
-                    {briefing.route.fixes.length} waypoints
-                  </Text>
-                </View>
-              </View>
-            ) : (
-              <View style={s.mapMissing} wrap={false}>
-                <Text style={{ fontSize: 8, color: mute }}>
-                  Live map capture unavailable for this export.
-                </Text>
-              </View>
-            )}
+            <PdfVectorMap briefing={briefing} />
           </View>
         </View>
 

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AppShell } from "@/components/layout/app-shell";
 import { FlightBriefingForm } from "@/components/forms/flight-briefing-form";
+import { NbWxBriefMark } from "@/components/brand/nb-wxbrief-logo";
 import { APP_NAME } from "@/domain/constants/app";
 
 export const metadata: Metadata = {
@@ -12,8 +13,11 @@ export default function HomePage() {
   return (
     <AppShell>
       <div className="mx-auto max-w-3xl space-y-6">
-        <div className="space-y-2">
-          <p className="efb-label">NB-WxBrief</p>
+        <div className="space-y-3">
+          <div className="flex items-center gap-3">
+            <NbWxBriefMark className="size-10" />
+            <p className="efb-label !mt-0">{APP_NAME}</p>
+          </div>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
             Flight weather briefing
           </h1>

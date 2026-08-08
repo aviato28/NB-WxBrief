@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 import type { NextRequest } from "next/server";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 
 interface MapPoint {
   readonly lat: number;
@@ -35,6 +35,8 @@ interface MapRequestBody {
 
 const WIDTH = 1600;
 const HEIGHT = 900;
+/** Light CARTO tiles — readable in print PDFs (dark_all reads as a black block). */
+const BASEMAP = "https://a.basemaps.cartocdn.com/light_all";
 
 function lon2x(lon: number, zoom: number): number {
   return ((lon + 180) / 360) * 2 ** zoom;
@@ -55,9 +57,9 @@ function turbColor(intensity: string): string {
     case "MODERATE":
       return "#f59e0b";
     case "LIGHT":
-      return "#38bdf8";
+      return "#2563eb";
     default:
-      return "#34d399";
+      return "#059669";
   }
 }
 
@@ -72,6 +74,26 @@ function polyToPath(
     })
     .concat(["Z"])
     .join(" ");
+}
+
+async function tileToDataUrl(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent": "NB-WxBrief/1.0 (aviation weather briefing)",
+        Accept: "image/png,image/*",
+      },
+      signal: AbortSignal.timeout(5000),
+      cache: "force-cache",
+    });
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength < 64) return null;
+    const ct = res.headers.get("content-type") ?? "image/png";
+    return `data:${ct};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
@@ -95,10 +117,10 @@ export async function POST(request: NextRequest): Promise<Response> {
   const maxLon = Math.max(...lons);
 
   let zoom = 3;
-  for (let z = 8; z >= 2; z -= 1) {
+  for (let z = 7; z >= 2; z -= 1) {
     const w = Math.abs(lon2x(maxLon, z) - lon2x(minLon, z)) * 256;
     const h = Math.abs(lat2y(minLat, z) - lat2y(maxLat, z)) * 256;
-    if (w < WIDTH - 96 && h < HEIGHT - 96) {
+    if (w < WIDTH - 120 && h < HEIGHT - 120) {
       zoom = z;
       break;
     }
@@ -120,14 +142,15 @@ export async function POST(request: NextRequest): Promise<Response> {
   const tileMinY = Math.floor(centerY - HEIGHT / 2 / 256) - 1;
   const tileMaxY = Math.ceil(centerY + HEIGHT / 2 / 256) + 1;
 
-  const tiles: Array<{
+  type TileSpec = {
     key: string;
     url: string;
     left: number;
     top: number;
     opacity: number;
-  }> = [];
+  };
 
+  const specs: TileSpec[] = [];
   for (let ty = tileMinY; ty <= tileMaxY; ty += 1) {
     for (let tx = tileMinX; tx <= tileMaxX; tx += 1) {
       const wrappedX = ((tx % maxIndex) + maxIndex) % maxIndex;
@@ -137,15 +160,15 @@ export async function POST(request: NextRequest): Promise<Response> {
       if (left > WIDTH || top > HEIGHT || left + 256 < 0 || top + 256 < 0) {
         continue;
       }
-      tiles.push({
+      specs.push({
         key: `b-${zoom}-${wrappedX}-${ty}`,
-        url: `https://a.basemaps.cartocdn.com/dark_all/${zoom}/${wrappedX}/${ty}.png`,
+        url: `${BASEMAP}/${zoom}/${wrappedX}/${ty}.png`,
         left,
         top,
         opacity: 1,
       });
       if (body.radarTileUrl) {
-        tiles.push({
+        specs.push({
           key: `r-${zoom}-${wrappedX}-${ty}`,
           url: body.radarTileUrl
             .replace("{z}", String(zoom))
@@ -153,13 +176,30 @@ export async function POST(request: NextRequest): Promise<Response> {
             .replace("{y}", String(ty)),
           left,
           top,
-          opacity: 0.55,
+          opacity: 0.45,
         });
       }
     }
   }
 
-  const limitedTiles = tiles.slice(0, 100);
+  // Cap tile count; prefer basemap over radar when trimming.
+  const limited = specs
+    .filter((t) => t.key.startsWith("b-"))
+    .slice(0, 48)
+    .concat(specs.filter((t) => t.key.startsWith("r-")).slice(0, 24));
+
+  const fetched = await Promise.all(
+    limited.map(async (tile) => {
+      const dataUrl = await tileToDataUrl(tile.url);
+      return dataUrl
+        ? { ...tile, dataUrl }
+        : null;
+    }),
+  );
+  const tiles = fetched.filter(
+    (t): t is TileSpec & { dataUrl: string } => t !== null,
+  );
+
   const routeD = path
     .map((p, i) => {
       const xy = project(p.lat, p.lon);
@@ -179,17 +219,18 @@ export async function POST(request: NextRequest): Promise<Response> {
           height: HEIGHT,
           display: "flex",
           position: "relative",
-          backgroundColor: "#0b0e13",
+          // Light chart background — visible even if every tile fails
+          backgroundColor: "#d9e6f2",
           overflow: "hidden",
         }}
       >
-        {limitedTiles.map((tile) => (
-          // next/og ImageResponse requires raw <img> for remote tiles
+        {tiles.map((tile) => (
+          // next/og ImageResponse requires raw <img> for tile bitmaps
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={tile.key}
             alt=""
-            src={tile.url}
+            src={tile.dataUrl}
             width={256}
             height={256}
             style={{
@@ -211,8 +252,8 @@ export async function POST(request: NextRequest): Promise<Response> {
               key={`sig-${index}`}
               d={polyToPath(sig.points, project)}
               fill={sig.hazard === "CONVECTIVE" ? "#f97316" : "#eab308"}
-              fillOpacity="0.2"
-              stroke={sig.hazard === "CONVECTIVE" ? "#f97316" : "#eab308"}
+              fillOpacity="0.22"
+              stroke={sig.hazard === "CONVECTIVE" ? "#ea580c" : "#ca8a04"}
               strokeWidth="2"
             />
           ))}
@@ -220,7 +261,15 @@ export async function POST(request: NextRequest): Promise<Response> {
           <path
             d={routeD}
             fill="none"
-            stroke="#4aa3ff"
+            stroke="#ffffff"
+            strokeWidth="9"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+          <path
+            d={routeD}
+            fill="none"
+            stroke="#0b4f8a"
             strokeWidth="5"
             strokeLinejoin="round"
             strokeLinecap="round"
@@ -235,7 +284,7 @@ export async function POST(request: NextRequest): Promise<Response> {
                 cy={xy.y}
                 r={t.intensity === "NONE" ? 5 : 9}
                 fill={turbColor(t.intensity)}
-                stroke="#e7ecf4"
+                stroke="#0b1524"
                 strokeWidth="1"
               />
             );
@@ -249,8 +298,8 @@ export async function POST(request: NextRequest): Promise<Response> {
                 cx={xy.x}
                 cy={xy.y}
                 r={6}
-                fill="#f0b429"
-                stroke="#e7ecf4"
+                fill="#b45309"
+                stroke="#0b1524"
                 strokeWidth="1"
               />
             );
@@ -267,11 +316,10 @@ export async function POST(request: NextRequest): Promise<Response> {
                 left: xy.x + 10,
                 top: xy.y - 12,
                 display: "flex",
-                color: "#f8fafc",
+                color: "#0b1524",
                 fontSize: 18,
                 fontFamily: "Helvetica",
                 fontWeight: 700,
-                textShadow: "0 1px 2px rgba(0,0,0,0.9)",
               }}
             >
               {fix.name}
@@ -285,13 +333,13 @@ export async function POST(request: NextRequest): Promise<Response> {
             left: 16,
             bottom: 16,
             display: "flex",
-            backgroundColor: "rgba(11,14,19,0.8)",
-            color: "#cbd5e1",
-            fontSize: 20,
+            backgroundColor: "rgba(255,255,255,0.88)",
+            color: "#334155",
+            fontSize: 18,
             padding: "10px 14px",
           }}
         >
-          NB-WxBrief · CARTO basemap · filed route · weather overlays
+          NB-WxBrief · route chart · weather overlays
         </div>
       </div>
     ),
