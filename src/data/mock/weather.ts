@@ -399,6 +399,7 @@ export function buildMockEnrouteWeather(flightLevel: number): EnrouteWeather {
         windSpeedKt: 85,
         temperatureC: -48,
         shearProxyKtPer1000Ft: 2.1,
+        cloudCoverPct: 40,
       },
       {
         point: { latitude: 48, longitude: -40 },
@@ -408,6 +409,7 @@ export function buildMockEnrouteWeather(flightLevel: number): EnrouteWeather {
         windSpeedKt: 110,
         temperatureC: -52,
         shearProxyKtPer1000Ft: 3.4,
+        cloudCoverPct: 55,
       },
       {
         point: { latitude: 51, longitude: -15 },
@@ -417,18 +419,33 @@ export function buildMockEnrouteWeather(flightLevel: number): EnrouteWeather {
         windSpeedKt: 95,
         temperatureC: -50,
         shearProxyKtPer1000Ft: 4.2,
+        cloudCoverPct: 70,
       },
     ],
     turbulence: [
       {
-        segmentLabel: "Oceanic mid-track",
+        segmentLabel: "KJFK–50N050W",
+        fromFix: "KJFK",
+        toFix: "50N050W",
         intensity: "LIGHT",
-        notes: "Light chop in jet core. Occasional moderate possible near FL340–360.",
+        flightLevelBand: `FL${flightLevel - 20}-${flightLevel + 20}`,
+        expectedDuration: "About 20–45 minutes",
+        likelyCause: "CLEAR_AIR",
+        confidence: "MEDIUM",
+        pilotText: "KJFK–50N050W\nOccasional light turbulence.",
+        notes: "Clear-air turbulence risk from vertical shear. Confidence MEDIUM.",
       },
       {
-        segmentLabel: "Shanwick FIR",
+        segmentLabel: "50N050W–EGLL",
+        fromFix: "50N050W",
+        toFix: "EGLL",
         intensity: "MODERATE",
-        notes: "SIGMET turbulence FL280–380. Consider FL change if sustained moderate.",
+        flightLevelBand: `FL${flightLevel - 20}-${flightLevel + 20}`,
+        expectedDuration: "About 45–90 minutes",
+        likelyCause: "JET_STREAM_SHEAR",
+        confidence: "HIGH",
+        pilotText: `50N050W–EGLL\nModerate CAT possible. FL${flightLevel - 20}-${flightLevel + 20}.`,
+        notes: "Likely jet-stream related wind shear. Confidence HIGH.",
       },
     ],
     convective: [
@@ -444,11 +461,18 @@ export function buildMockEnrouteWeather(flightLevel: number): EnrouteWeather {
       },
     ],
     alongRouteNotes: [
-      "Strong westerly jet. Expect reduced eastbound groundspeed penalty vs average; westbound would be significantly slower.",
+      "Strong westerly jet. Expect reduced eastbound groundspeed penalty vs average.",
       "Monitor Shanwick SIGMET for turbulence and coordinate FL change early if needed.",
       "Destination TEMPO IFR overnight — plan fuel/holding strategy accordingly.",
     ],
     sigmets: MOCK_SIGMETS,
+    waypointConditions: [],
+    dispatchBullets: [
+      "Moderate turbulence expected after oceanic entry.",
+      "Strong tailwinds in mid-NAT jet core.",
+      "Destination MVFR with TEMPO IFR overnight.",
+      "Alternate weather suitable with strong winds.",
+    ],
   };
 }
 

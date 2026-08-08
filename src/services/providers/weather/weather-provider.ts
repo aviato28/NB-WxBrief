@@ -1,4 +1,6 @@
 import type { GeoBounds, IcaoCode } from "@/domain/models/common";
+import type { ParsedRoute } from "@/domain/models/route";
+import type { GeoPoint } from "@/domain/models/common";
 import type {
   AirportWeather,
   EnrouteWeather,
@@ -10,6 +12,10 @@ export interface EnrouteWeatherQuery {
   readonly destinationIcao: IcaoCode | string;
   readonly flightLevel: number;
   readonly routeText: string;
+  /** Preferred: fully resolved filed route. */
+  readonly route?: ParsedRoute;
+  /** Legacy fallback path points. */
+  readonly routePoints?: readonly GeoPoint[];
 }
 
 export interface WeatherProvider {

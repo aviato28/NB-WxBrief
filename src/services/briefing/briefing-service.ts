@@ -1,12 +1,17 @@
 import type { WeatherBriefing } from "@/domain/models/briefing";
 import type { FlightRequest } from "@/domain/models/route";
 import type { AirportWeather } from "@/domain/models/weather";
-import { greatCircleDistanceNm, parseAtcRoute } from "@/lib/geo";
+import { briefingCache } from "@/lib/cache";
 import type { ProviderRegistry } from "@/services/providers/registry";
 import { getProviderRegistry } from "@/services/providers/registry";
 import { buildOperationalSummary } from "@/services/weather/operational-summary";
 import { buildThreatSummary } from "@/services/weather/threat-builder";
 import { buildMockThreats } from "@/data/mock/weather";
+import { RouteEngine } from "@/services/routing/route-engine";
+import {
+  buildDispatchBullets,
+  buildWaypointConditions,
+} from "@/services/weather/turbulence-briefing";
 
 export class BriefingError extends Error {
   readonly code:
@@ -36,12 +41,36 @@ function withRoleSummary(
   };
 }
 
+function cacheKey(request: FlightRequest): string {
+  return [
+    request.departureIcao,
+    request.destinationIcao,
+    request.alternateIcao ?? "",
+    request.flightLevel,
+    request.atcRoute,
+    request.flightNumber ?? "",
+    request.aircraftRegistration ?? "",
+  ].join("|");
+}
+
 export class BriefingService {
+  private readonly routeEngine: RouteEngine;
+
   constructor(
     private readonly providers: ProviderRegistry = getProviderRegistry(),
-  ) {}
+  ) {
+    this.routeEngine = new RouteEngine(providers.airports);
+  }
 
   async generate(request: FlightRequest): Promise<WeatherBriefing> {
+    return briefingCache.getOrSet(cacheKey(request), () =>
+      this.generateUncached(request),
+    );
+  }
+
+  private async generateUncached(
+    request: FlightRequest,
+  ): Promise<WeatherBriefing> {
     try {
       const [departure, destination, alternate] = await Promise.all([
         this.providers.airports.lookup(request.departureIcao),
@@ -70,7 +99,13 @@ export class BriefingService {
         );
       }
 
-      const [departureWx, destinationWx, alternateWx, enroute] =
+      const route = await this.routeEngine.resolve(
+        request.atcRoute,
+        departure,
+        destination,
+      );
+
+      const [departureWx, destinationWx, alternateWx, enrouteRaw] =
         await Promise.all([
           this.providers.weather.getAirportWeather(request.departureIcao),
           this.providers.weather.getAirportWeather(request.destinationIcao),
@@ -82,6 +117,8 @@ export class BriefingService {
             destinationIcao: request.destinationIcao,
             flightLevel: request.flightLevel,
             routeText: request.atcRoute,
+            route,
+            routePoints: route.pathPoints,
           }),
         ]);
 
@@ -104,15 +141,31 @@ export class BriefingService {
         ? withRoleSummary("alternate", alternateWx)
         : null;
 
-      const route = parseAtcRoute(
-        request.atcRoute,
-        departure.coordinates,
-        destination.coordinates,
-      );
+      const dispatchBullets = buildDispatchBullets({
+        turbulence: enrouteRaw.turbulence,
+        convective: enrouteRaw.convective,
+        winds: enrouteRaw.windsAloft,
+        departure: departureWeather,
+        destination: destinationWeather,
+        alternate: alternateWeather,
+        route,
+      });
 
-      const distanceNm = Math.round(
-        greatCircleDistanceNm(departure.coordinates, destination.coordinates),
-      );
+      const waypointConditions =
+        enrouteRaw.waypointConditions.length > 0
+          ? enrouteRaw.waypointConditions
+          : buildWaypointConditions({
+              route,
+              winds: enrouteRaw.windsAloft,
+              turbulence: enrouteRaw.turbulence,
+              sigmets: enrouteRaw.sigmets,
+            });
+
+      const enroute = {
+        ...enrouteRaw,
+        dispatchBullets,
+        waypointConditions,
+      };
 
       const generatedAt = new Date().toISOString();
 
@@ -138,8 +191,8 @@ export class BriefingService {
           destination,
           alternate,
           flightLevel: request.flightLevel,
-          routeDistanceNm: distanceNm,
-          estimatedAirway: request.atcRoute.split(/\s+/).slice(0, 8).join(" "),
+          routeDistanceNm: Math.round(route.totalDistanceNm),
+          estimatedAirway: route.fixes.map((fix) => fix.name).join(" "),
           generatedAt,
         },
         route,

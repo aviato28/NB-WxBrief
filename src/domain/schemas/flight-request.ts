@@ -19,6 +19,14 @@ const optionalIcaoSchema = z
     message: "Enter a valid 4-character ICAO identifier or leave blank",
   });
 
+const optionalText = z
+  .string()
+  .trim()
+  .transform((value) => (value === "" ? null : value.toUpperCase()))
+  .refine((value) => value === null || value.length <= 16, {
+    message: "Maximum 16 characters",
+  });
+
 /**
  * Flight levels for airline jets typically FL180–FL450.
  * Stored as the numeric FL (e.g. 350), not feet.
@@ -45,6 +53,8 @@ export const flightBriefingRequestSchema = z
       .refine((value) => value % FLIGHT_LEVEL_STEP === 0, {
         message: `Flight level must be in increments of ${FLIGHT_LEVEL_STEP}`,
       }),
+    flightNumber: optionalText,
+    aircraftRegistration: optionalText,
   })
   .refine((data) => data.departureIcao !== data.destinationIcao, {
     message: "Departure and destination must differ",
@@ -62,4 +72,6 @@ export const flightBriefingRequestSchema = z
   );
 
 export type FlightBriefingFormValues = z.input<typeof flightBriefingRequestSchema>;
-export type FlightBriefingRequestParsed = z.output<typeof flightBriefingRequestSchema>;
+export type FlightBriefingRequestParsed = z.output<
+  typeof flightBriefingRequestSchema
+>;

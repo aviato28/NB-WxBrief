@@ -27,6 +27,8 @@ const DEFAULT_VALUES: FlightBriefingFormValues = {
   destinationIcao: "EGLL",
   alternateIcao: "EIDW",
   flightLevel: 350,
+  flightNumber: "NB101",
+  aircraftRegistration: "N101NB",
   atcRoute:
     "KJFK SHIPP LINND KINGG DOVEY 50N050W 52N040W 53N030W 53N020W MALOT GISTU LESLU EGLL",
 };
@@ -56,6 +58,36 @@ export function FlightBriefingForm() {
   return (
     <form onSubmit={onSubmit} className="efb-panel space-y-5 p-4 sm:p-6">
       <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          id="flightNumber"
+          label="Flight number (optional)"
+          error={form.formState.errors.flightNumber?.message}
+        >
+          <Input
+            id="flightNumber"
+            autoCapitalize="characters"
+            spellCheck={false}
+            className="font-mono uppercase"
+            placeholder="NB101"
+            {...form.register("flightNumber")}
+          />
+        </Field>
+
+        <Field
+          id="aircraftRegistration"
+          label="Aircraft registration (optional)"
+          error={form.formState.errors.aircraftRegistration?.message}
+        >
+          <Input
+            id="aircraftRegistration"
+            autoCapitalize="characters"
+            spellCheck={false}
+            className="font-mono uppercase"
+            placeholder="N101NB"
+            {...form.register("aircraftRegistration")}
+          />
+        </Field>
+
         <Field
           id="departureIcao"
           label="Departure ICAO"

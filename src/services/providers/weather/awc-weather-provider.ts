@@ -1,12 +1,12 @@
-import type { GeoBounds } from "@/domain/models/common";
+import type { GeoBounds, GeoPoint } from "@/domain/models/common";
 import type {
   AirportWeather,
   ConvectiveAssessment,
   EnrouteWeather,
   Sigmet,
 } from "@/domain/models/weather";
+import type { ParsedRoute } from "@/domain/models/route";
 import { routeIntersectsSigmet } from "@/lib/aviation-geo";
-import { interpolateGreatCircle } from "@/lib/geo";
 import { fetchJson, fetchJsonSoft } from "@/lib/http";
 import {
   buildAirportWeatherBundle,
@@ -24,16 +24,18 @@ import type {
   WeatherProvider,
 } from "@/services/providers/weather/weather-provider";
 import type { AirportProvider } from "@/services/providers/airports/airport-provider";
+import {
+  buildDispatchBullets,
+  buildTurbulenceBriefing,
+  buildWaypointConditions,
+} from "@/services/weather/turbulence-briefing";
 
 const AWC_BASE = "https://aviationweather.gov/api/data";
 
 /**
  * Live weather provider:
- * - NOAA AWC for METAR / TAF / SIGMET (authoritative aviation products)
- * - Open-Meteo for winds-aloft advisory samples along the route
- *
- * Must run server-side — AWC does not allow browser CORS.
- * Non-critical upstream failures degrade the briefing instead of aborting it.
+ * - NOAA AWC for METAR / TAF / SIGMET
+ * - Open-Meteo for winds/cloud along the resolved route
  */
 export class AwcWeatherProvider implements WeatherProvider {
   readonly id = "awc+open-meteo";
@@ -96,43 +98,47 @@ export class AwcWeatherProvider implements WeatherProvider {
       }),
     ]);
 
-    const mapped = [...(intl ?? []), ...(us ?? [])].map((item, index) =>
+    return [...(intl ?? []), ...(us ?? [])].map((item, index) =>
       mapAwcSigmet(item, index),
     );
-    return mapped;
   }
 
   async getEnrouteWeather(query: EnrouteWeatherQuery): Promise<EnrouteWeather> {
-    const [departure, destination] = await Promise.all([
-      this.airports.lookup(query.departureIcao),
-      this.airports.lookup(query.destinationIcao),
-    ]);
-
-    const routePoints =
-      departure && destination
-        ? interpolateGreatCircle(
-            departure.coordinates,
-            destination.coordinates,
-            48,
-          )
-        : [];
+    const routePoints: GeoPoint[] = [
+      ...(query.route?.pathPoints ?? query.routePoints ?? []),
+    ];
 
     const [allSigmets, windsResult] = await Promise.all([
       this.getSigmets(null),
-      routePoints.length > 0
+      query.route && query.route.samples.length > 0
         ? this.windsClient
-            .sampleRouteWinds(routePoints, query.flightLevel)
+            .sampleAlongRoute(query.route.samples, query.flightLevel)
             .catch((error: unknown) => {
               console.warn("[open-meteo-winds] soft-fail:", error);
-              return { windsAloft: [], turbulence: [] };
+              return { windsAloft: [], shearBySampleId: new Map() };
             })
-        : Promise.resolve({ windsAloft: [], turbulence: [] }),
+        : routePoints.length > 0
+          ? this.windsClient
+              .sampleRouteWinds(routePoints, query.flightLevel)
+              .then((r) => ({
+                windsAloft: r.windsAloft.map((w) => ({
+                  ...w,
+                  cloudCoverPct: w.cloudCoverPct ?? null,
+                })),
+                shearBySampleId: new Map(),
+              }))
+              .catch(() => ({
+                windsAloft: [],
+                shearBySampleId: new Map(),
+              }))
+          : Promise.resolve({
+              windsAloft: [],
+              shearBySampleId: new Map(),
+            }),
     ]);
 
-    const winds = windsResult;
+    const winds = windsResult.windsAloft;
 
-    // Only keep SIGMETs that geometrically intersect the route corridor.
-    // Do NOT fall back to unrelated global products — that creates false threats.
     const sigmets = allSigmets
       .filter((sigmet) =>
         sigmet.polygon
@@ -147,54 +153,110 @@ export class AwcWeatherProvider implements WeatherProvider {
       convective.push({
         segmentLabel: "Route corridor",
         risk: convectiveSigmets.length >= 3 ? "SCATTERED" : "ISOLATED",
-        notes: `${convectiveSigmets.length} convective SIGMET(s) intersect or are near the route corridor.`,
+        notes: `${convectiveSigmets.length} convective SIGMET(s) intersect or are near the filed route corridor.`,
       });
     } else {
       convective.push({
         segmentLabel: "Route corridor",
         risk: "NONE",
         notes:
-          "No convective SIGMETs currently intersecting the sampled route corridor.",
+          "No convective SIGMETs currently intersecting the filed route corridor.",
       });
     }
 
+    const emptyRoute: ParsedRoute = {
+      raw: query.routeText,
+      fixes: [],
+      pathPoints: routePoints,
+      greatCirclePoints: routePoints,
+      legs: [],
+      samples: [],
+      totalDistanceNm: 0,
+      unresolvedFixNames: [],
+    };
+
+    const route = query.route ?? emptyRoute;
+
+    const turbulence = buildTurbulenceBriefing({
+      route,
+      winds,
+      flightLevel: query.flightLevel,
+      sigmets,
+    });
+
     const alongRouteNotes = [
-      `Winds aloft sampled via Open-Meteo at FL${query.flightLevel} (advisory model data, not official FD winds).`,
-      `SIGMET filter applied against great-circle route ${query.departureIcao}–${query.destinationIcao}. ATC route string is retained for briefing context: ${query.routeText.slice(0, 120)}${query.routeText.length > 120 ? "…" : ""}`,
+      `Winds/cloud sampled via Open-Meteo along the filed waypoint route at FL${query.flightLevel} (advisory).`,
+      `Route distance ${Math.round(route.totalDistanceNm).toLocaleString()} NM across ${route.legs.length} leg(s).`,
     ];
 
-    if (allSigmets.length === 0) {
+    if (route.unresolvedFixNames.length > 0) {
       alongRouteNotes.push(
-        "SIGMET feed was empty or temporarily unavailable; treat enroute SIGMET coverage as incomplete.",
+        `Estimated positions for unresolved fixes: ${route.unresolvedFixNames.join(", ")}.`,
       );
     }
 
-    if (winds.windsAloft.length === 0) {
+    if (winds.length === 0) {
       alongRouteNotes.push(
-        "Winds aloft samples unavailable for this request; verify with official FD / company winds.",
+        "Winds aloft samples unavailable; verify with official FD / company winds.",
       );
     } else {
-      const maxWind = Math.max(
-        ...winds.windsAloft.map((sample) => sample.windSpeedKt),
-      );
+      const maxWind = Math.max(...winds.map((sample) => sample.windSpeedKt));
       alongRouteNotes.push(`Peak sampled wind along route ≈ ${maxWind} kt.`);
     }
 
+    // Placeholder terminal weather for dispatch bullets — filled by BriefingService.
+    const stubWx = {
+      icao: query.departureIcao as AirportWeather["icao"],
+      metar: null,
+      taf: null,
+      operationalSummary: "",
+      fetchedAt: new Date().toISOString(),
+    };
+
+    const waypointConditions = buildWaypointConditions({
+      route,
+      winds,
+      turbulence,
+      sigmets,
+    });
+
+    const dispatchBullets = buildDispatchBullets({
+      turbulence,
+      convective,
+      winds,
+      departure: stubWx,
+      destination: {
+        ...stubWx,
+        icao: query.destinationIcao as AirportWeather["icao"],
+      },
+      alternate: null,
+      route,
+    });
+
     return {
-      windsAloft: winds.windsAloft,
+      windsAloft: winds,
       turbulence:
-        winds.turbulence.length > 0
-          ? winds.turbulence
+        turbulence.length > 0
+          ? turbulence
           : [
               {
                 segmentLabel: "Route corridor",
+                fromFix: query.departureIcao,
+                toFix: query.destinationIcao,
                 intensity: "NONE",
+                flightLevelBand: `FL${query.flightLevel}`,
+                expectedDuration: "Entire route",
+                likelyCause: "UNKNOWN",
+                confidence: "LOW",
+                pilotText: "Route corridor\nSmooth.",
                 notes: "No significant model shear detected at sampled points.",
               },
             ],
       convective,
       alongRouteNotes,
       sigmets,
+      waypointConditions,
+      dispatchBullets,
     };
   }
 }
