@@ -38,19 +38,30 @@ export const FLIGHT_LEVEL_STEP = 10;
 /**
  * Accepts datetime-local (`YYYY-MM-DDTHH:mm`) or full ISO; normalizes to UTC ISO.
  * Form values are treated as UTC (field is labeled Departure time UTC).
+ * Empty / missing values default to the next briefing ETD so older URLs still work.
  */
 export const departureTimeUtcSchema = z
   .string()
   .trim()
-  .min(1, "Enter planned departure time (UTC)")
   .transform((value) => {
+    if (!value) {
+      // Lazy default — keep schema pure of Date.now at module load
+      const d = new Date(Date.now() + 90 * 60_000);
+      d.setUTCMinutes(0, 0, 0);
+      d.setUTCHours(d.getUTCHours() + 1);
+      return d.toISOString();
+    }
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
       return `${value}:00.000Z`;
     }
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value)) {
       return value.endsWith("Z") ? value : `${value}Z`;
     }
-    return value;
+    // URLSearchParams may turn `:` into spaces in some edge clients — restore
+    const restored = value.includes(" ")
+      ? value.replace(" ", "T").replace(/ /g, ":")
+      : value;
+    return restored;
   })
   .refine((value) => !Number.isNaN(Date.parse(value)), {
     message: "Enter a valid departure date/time",

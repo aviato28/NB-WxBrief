@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { flightBriefingRequestSchema } from "@/domain/schemas/flight-request";
-import { toFlightRequest } from "@/lib/flight-request";
+import { defaultDepartureTimeUtc, toFlightRequest } from "@/lib/flight-request";
 import {
   BriefingError,
   getBriefingService,
@@ -24,13 +24,27 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  const parsed = flightBriefingRequestSchema.safeParse(body);
+  // Back-compat: older clients may omit ETD
+  const normalized =
+    body && typeof body === "object"
+      ? {
+          ...(body as Record<string, unknown>),
+          departureTimeUtc:
+            (body as { departureTimeUtc?: unknown }).departureTimeUtc ||
+            defaultDepartureTimeUtc(),
+        }
+      : body;
+
+  const parsed = flightBriefingRequestSchema.safeParse(normalized);
   if (!parsed.success) {
+    const firstIssue = parsed.error.issues[0];
     return NextResponse.json(
       {
         error: {
           code: "INVALID_REQUEST",
-          message: "Flight request validation failed.",
+          message: firstIssue
+            ? `Flight request validation failed: ${firstIssue.path.join(".")} — ${firstIssue.message}`
+            : "Flight request validation failed.",
           details: parsed.error.flatten(),
         },
       },

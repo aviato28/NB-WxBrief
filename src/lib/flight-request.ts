@@ -48,7 +48,8 @@ export function flightRequestFromSearchParams(
     alternateIcao: params.get("altn") ?? "",
     atcRoute: params.get("route") ?? "",
     flightLevel: params.get("fl") ?? "",
-    departureTimeUtc: params.get("etd") ?? "",
+    // Default ETD when older bookmarks omit `etd`
+    departureTimeUtc: params.get("etd") ?? defaultDepartureTimeUtc(),
     flightNumber: params.get("fn") ?? "",
     aircraftRegistration: params.get("reg") ?? "",
   });
