@@ -6,7 +6,25 @@ export type RouteFixKind =
   | "navaid"
   | "latlon"
   | "estimated"
-  | "unresolved";
+  | "unresolved"
+  | "airway"
+  | "procedure";
+
+/** Structured ATC token after parse (airways retained). */
+export type AtcTokenKind =
+  | "airport"
+  | "fix"
+  | "navaid"
+  | "latlon"
+  | "airway"
+  | "procedure"
+  | "direct"
+  | "unknown";
+
+export interface AtcRouteToken {
+  readonly raw: string;
+  readonly kind: AtcTokenKind;
+}
 
 export interface RouteFix {
   readonly id: string;
@@ -14,6 +32,8 @@ export interface RouteFix {
   readonly coordinates: GeoPoint | null;
   readonly kind: RouteFixKind;
   readonly resolved: boolean;
+  /** Airway used outbound from this fix toward the next (e.g. J60), if filed. */
+  readonly viaAirway?: string | null;
 }
 
 export interface RouteLeg {
@@ -36,6 +56,10 @@ export interface RouteSamplePoint {
 
 export interface ParsedRoute {
   readonly raw: string;
+  /** Filed string with airways preserved in order (normalized spacing). */
+  readonly filedTokens: readonly AtcRouteToken[];
+  /** Display string including airways, e.g. `RBV J60 PSB J6 HVQ`. */
+  readonly resolvedRouteText: string;
   readonly fixes: readonly RouteFix[];
   /** Ordered polyline of the filed route (not dep→dest great-circle). */
   readonly pathPoints: readonly GeoPoint[];

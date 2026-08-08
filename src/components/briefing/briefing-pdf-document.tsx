@@ -824,6 +824,11 @@ export function BriefingPdfDocument({
 
           <View style={s.routeBand}>
             <Text style={s.routeText}>ROUTE  {briefing.route.raw}</Text>
+            {briefing.route.resolvedRouteText ? (
+              <Text style={[s.routeText, { marginTop: 3, color: cyan }]}>
+                PARSED  {briefing.route.resolvedRouteText}
+              </Text>
+            ) : null}
           </View>
         </View>
 

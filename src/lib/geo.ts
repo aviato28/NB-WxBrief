@@ -1,5 +1,7 @@
 import type { GeoPoint } from "@/domain/models/common";
 import type {
+  AtcRouteToken,
+  AtcTokenKind,
   ParsedRoute,
   RouteFix,
   RouteFixKind,
@@ -11,8 +13,6 @@ import {
   ROUTE_SAMPLE_MAX_NM,
   ROUTE_SAMPLE_MIN_NM,
 } from "@/domain/constants/app";
-
-const ROUTE_TOKEN_SPLIT = /[\s/]+/;
 
 /** Tokens that are routing instructions, not geographic fixes. */
 const NON_FIX_TOKENS = new Set([
@@ -26,6 +26,8 @@ const NON_FIX_TOKENS = new Set([
   "LEVEL",
   "FL",
 ]);
+
+const DIRECT_TOKENS = new Set(["DCT", "DIRECT"]);
 
 function toRadians(degrees: number): number {
   return (degrees * Math.PI) / 180;
@@ -151,22 +153,72 @@ export function parseLatLonToken(token: string): GeoPoint | null {
 }
 
 export function tokenizeAtcRoute(rawRoute: string): string[] {
-  return rawRoute
-    .trim()
-    .toUpperCase()
-    .split(ROUTE_TOKEN_SPLIT)
-    .map((token) => token.replace(/[^A-Z0-9]/g, ""))
-    .filter((token) => token.length > 0)
-    .filter((token) => !NON_FIX_TOKENS.has(token))
-    .filter((token) => !/^FL\d{2,3}$/.test(token));
+  return classifyAtcRouteTokens(rawRoute)
+    .filter(
+      (token) =>
+        token.kind !== "direct" &&
+        token.kind !== "airway" &&
+        token.kind !== "unknown",
+    )
+    .map((token) => token.raw);
 }
 
 /**
- * Airway-like tokens (e.g. J60, UL9, NATS) are excluded when they match
- * short alphanumeric airway patterns; 5-letter fixes and ICAOs are kept.
+ * Parse a filed ATC route string into typed tokens.
+ * Preserves airways (J60, UL9, N96A) and splits ICAO `.` / `..` separators.
+ */
+export function classifyAtcRouteTokens(rawRoute: string): AtcRouteToken[] {
+  const normalized = rawRoute
+    .trim()
+    .toUpperCase()
+    // ICAO field-10 style: KJFK..RBV..J60..PSB or KJFK.SHIPP5.SHIPP
+    .replace(/\.\.+/g, " ")
+    .replace(/\./g, " ")
+    .replace(/\//g, " ");
+
+  const parts = normalized
+    .split(/\s+/)
+    .map((token) => token.replace(/[^A-Z0-9]/g, ""))
+    .filter((token) => token.length > 0)
+    .filter((token) => !/^FL\d{2,3}$/.test(token));
+
+  return parts.map((raw) => ({ raw, kind: classifyAtcToken(raw) }));
+}
+
+export function classifyAtcToken(token: string): AtcTokenKind {
+  if (DIRECT_TOKENS.has(token)) return "direct";
+  if (NON_FIX_TOKENS.has(token)) return "unknown";
+  if (parseLatLonToken(token)) return "latlon";
+  if (isLikelyAirwayDesignator(token)) return "airway";
+  // SID/STAR procedure names often end with a digit (SHIPP5, BERDS2).
+  if (/^[A-Z]{3,5}\d[A-Z]?$/.test(token)) return "procedure";
+  if (/^[A-Z]{4}$/.test(token)) return "airport";
+  if (/^[A-Z]{5}$/.test(token)) return "fix";
+  if (/^[A-Z]{3}$/.test(token)) return "navaid";
+  return "unknown";
+}
+
+/**
+ * Airway-like tokens (e.g. J60, UL9, N96A, T213).
+ * Kept in the filed token list; skipped for geographic fix lookup.
  */
 export function isLikelyAirwayDesignator(token: string): boolean {
-  return /^[A-Z]{1,2}\d{1,4}[A-Z]?$/.test(token) && token.length < 5;
+  if (token.length < 2 || token.length > 6) return false;
+  // Domestic/jet/victor/RNAV/Q/T routes and common Euro airways (Ux n, Nx).
+  return (
+    /^[A-Z]{1,2}\d{1,4}[A-Z]?$/.test(token) ||
+    /^[TQ]\d{1,4}[A-Z]?$/.test(token)
+  );
+}
+
+/** Build a display string that keeps airways between bounding fixes. */
+export function formatResolvedRouteText(
+  tokens: readonly AtcRouteToken[],
+): string {
+  return tokens
+    .filter((token) => token.kind !== "direct" && token.kind !== "unknown")
+    .map((token) => token.raw)
+    .join(" ");
 }
 
 export function createRouteFix(
@@ -174,6 +226,7 @@ export function createRouteFix(
   index: number,
   coordinates: GeoPoint | null,
   kind: RouteFixKind,
+  viaAirway: string | null = null,
 ): RouteFix {
   return {
     id: `${name}-${index}`,
@@ -181,6 +234,7 @@ export function createRouteFix(
     coordinates,
     kind,
     resolved: coordinates !== null,
+    viaAirway,
   };
 }
 
@@ -321,15 +375,19 @@ export function parseAtcRoute(
   departure: GeoPoint,
   destination: GeoPoint,
 ): ParsedRoute {
-  const tokens = tokenizeAtcRoute(rawRoute).filter(
-    (token) => !isLikelyAirwayDesignator(token),
+  const filedTokens = classifyAtcRouteTokens(rawRoute);
+  const tokens = filedTokens.filter(
+    (token) =>
+      token.kind !== "direct" &&
+      token.kind !== "airway" &&
+      token.kind !== "unknown",
   );
   const fixes = [
     createRouteFix("DEP", 0, departure, "airport"),
     ...tokens.map((token, index) => {
-      const latlon = parseLatLonToken(token);
+      const latlon = parseLatLonToken(token.raw);
       return createRouteFix(
-        token,
+        token.raw,
         index + 1,
         latlon,
         latlon ? "latlon" : "unresolved",
@@ -340,16 +398,55 @@ export function parseAtcRoute(
 
   // Estimate unresolved between neighbors
   const estimated = estimateUnresolvedFixes(fixes);
-  const geometry = buildLegsAndSamples(estimated);
+  const withAirways = attachViaAirways(estimated, filedTokens);
+  const geometry = buildLegsAndSamples(withAirways);
 
   return {
     raw: rawRoute.trim(),
-    fixes: estimated,
-    unresolvedFixNames: estimated
+    filedTokens,
+    resolvedRouteText: formatResolvedRouteText(filedTokens),
+    fixes: withAirways,
+    unresolvedFixNames: withAirways
       .filter((fix) => fix.kind === "estimated" || fix.kind === "unresolved")
       .map((fix) => fix.name),
     ...geometry,
   };
+}
+
+/**
+ * Attach the airway designator that follows each fix in the filed token list
+ * onto that fix (`viaAirway`), so UI can show RBV → PSB via J60.
+ */
+export function attachViaAirways(
+  fixes: readonly RouteFix[],
+  tokens: readonly AtcRouteToken[],
+): RouteFix[] {
+  const result = fixes.map((fix) => ({ ...fix, viaAirway: fix.viaAirway ?? null }));
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (!token || token.kind !== "airway") continue;
+    // Find the nearest preceding geographic token name among fixes.
+    let prevName: string | null = null;
+    for (let j = i - 1; j >= 0; j -= 1) {
+      const prev = tokens[j];
+      if (!prev) continue;
+      if (
+        prev.kind === "airway" ||
+        prev.kind === "direct" ||
+        prev.kind === "unknown"
+      ) {
+        continue;
+      }
+      prevName = prev.raw;
+      break;
+    }
+    if (!prevName) continue;
+    const fixIndex = result.findIndex((fix) => fix.name === prevName);
+    if (fixIndex >= 0 && result[fixIndex]) {
+      result[fixIndex] = { ...result[fixIndex], viaAirway: token.raw };
+    }
+  }
+  return result;
 }
 
 export function estimateUnresolvedFixes(

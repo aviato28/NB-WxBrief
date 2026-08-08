@@ -96,11 +96,14 @@ function FitRoute({ points }: { readonly points: readonly [number, number][] }) 
 }
 
 function waypointIcon(selected: boolean): L.DivIcon {
+  const size = selected ? 12 : 9;
+  const color = selected ? "#f0b429" : "#4aa3ff";
+  // Circle marker HTML — no CSS rotate (rotate offset the icon from the polyline).
   return L.divIcon({
     className: "",
-    html: `<span style="display:block;width:${selected ? 12 : 9}px;height:${selected ? 12 : 9}px;border-radius:2px;background:${selected ? "#f0b429" : "#4aa3ff"};border:1px solid #e7ecf4;transform:rotate(45deg)"></span>`,
-    iconSize: [12, 12],
-    iconAnchor: [6, 6],
+    html: `<span style="display:block;width:${size}px;height:${size}px;border-radius:50%;background:${color};border:1.5px solid #e7ecf4;box-sizing:border-box"></span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 }
 
@@ -580,7 +583,8 @@ export function RouteMap({
       ) : (
         <p className="text-xs text-muted-foreground">
           Click a waypoint for wind, temperature, turbulence, cloud, and nearby
-          SIGMET context. Route follows the filed ATC waypoint sequence.
+          SIGMET context. Route follows the filed ATC sequence (airways kept in
+          the summary; map path is fix-to-fix).
         </p>
       )}
     </div>

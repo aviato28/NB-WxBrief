@@ -180,9 +180,14 @@ export function FlightBriefingForm() {
           rows={4}
           spellCheck={false}
           className="efb-mono min-h-28 resize-y"
+          placeholder="KJFK..SHIPP..LINND.. or KJFK DCT SHIPP JFK.. airways OK (J60 UL9)"
           aria-invalid={Boolean(form.formState.errors.atcRoute)}
           {...form.register("atcRoute")}
         />
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          Accepts ICAO dots (`..`), DCT, and airways (J/V/Q/T/U). Airways stay in
+          the parsed route; map path is fix-to-fix until centerlines are loaded.
+        </p>
       </Field>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
