@@ -5,9 +5,15 @@ import type { FlightCategory } from "@/domain/models/flight-category";
 import { MAP_ROUTE_WEIGHT } from "@/domain/constants/app";
 import "leaflet/dist/leaflet.css";
 
-const CAPTURE_WIDTH = 1800;
-const CAPTURE_HEIGHT = 980;
+const CAPTURE_WIDTH = 1600;
+const CAPTURE_HEIGHT = 900;
 const JET_STREAM_KT = 80;
+
+declare global {
+  interface Window {
+    __NB_WXBRIEF_MAP__?: L.Map | null;
+  }
+}
 
 function flightCategoryColor(category: FlightCategory | undefined): string {
   switch (category) {
@@ -49,9 +55,9 @@ function labeledIcon(name: string, accent: string): L.DivIcon {
     className: "nb-pdf-map-label",
     html: `<div style="display:flex;align-items:center;gap:4px;white-space:nowrap">
       <span style="width:9px;height:9px;background:${accent};border:1px solid #e7ecf4;transform:rotate(45deg);display:inline-block;flex-shrink:0"></span>
-      <span style="font:600 11px/1.1 Helvetica,Arial,sans-serif;color:#e7ecf4;text-shadow:0 1px 2px rgba(0,0,0,.85);letter-spacing:.02em">${name}</span>
+      <span style="font:600 12px/1.1 Helvetica,Arial,sans-serif;color:#e7ecf4;text-shadow:0 1px 2px rgba(0,0,0,.9)">${name}</span>
     </div>`,
-    iconSize: [90, 18],
+    iconSize: [100, 18],
     iconAnchor: [4, 9],
   });
 }
@@ -61,7 +67,9 @@ async function fetchRainViewerTiles(): Promise<{
   satellite: string | null;
 }> {
   try {
-    const res = await fetch("https://api.rainviewer.com/public/weather-maps.json");
+    const res = await fetch(
+      "https://api.rainviewer.com/public/weather-maps.json",
+    );
     if (!res.ok) return { radar: null, satellite: null };
     const data = (await res.json()) as {
       host?: string;
@@ -85,44 +93,114 @@ async function fetchRainViewerTiles(): Promise<{
   }
 }
 
-function waitForTiles(map: L.Map, timeoutMs = 4500): Promise<void> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (): void => {
-      if (settled) return;
-      settled = true;
-      map.off("moveend", onMoveEnd);
-      resolve();
-    };
-    const onMoveEnd = (): void => {
-      window.setTimeout(finish, 900);
-    };
-    map.once("moveend", onMoveEnd);
-    window.setTimeout(finish, timeoutMs);
-  });
+async function captureElement(node: HTMLElement): Promise<string | null> {
+  try {
+    return await toPng(node, {
+      pixelRatio: 2,
+      cacheBust: true,
+      backgroundColor: "#0b0e13",
+      filter: (el) => {
+        if (!(el instanceof HTMLElement)) return true;
+        return !el.classList.contains("leaflet-control-container");
+      },
+    });
+  } catch (error) {
+    console.warn("[pdf-map-capture] element capture failed:", error);
+    return null;
+  }
 }
 
-/**
- * Renders the same operational weather map used in the web UI into an
- * offscreen high-resolution PNG for PDF embedding. Does not alter the
- * visible website map.
- */
-export async function captureBriefingMapImage(
-  briefing: WeatherBriefing,
-): Promise<string | null> {
-  if (typeof document === "undefined") return null;
+async function captureVisibleMap(): Promise<string | null> {
+  const host = document.querySelector<HTMLElement>("[data-nb-route-map]");
+  const container =
+    host?.querySelector<HTMLElement>(".leaflet-container") ?? null;
+  if (!container) return null;
 
+  // Invalidate size so tiles settle before snapshot.
+  const map = window.__NB_WXBRIEF_MAP__;
+  if (map) {
+    map.invalidateSize();
+    await new Promise((r) => window.setTimeout(r, 400));
+  }
+
+  return captureElement(container);
+}
+
+async function captureViaApi(
+  briefing: WeatherBriefing,
+  radarTileUrl: string | null,
+): Promise<string | null> {
+  try {
+    const path = briefing.route.pathPoints.map((p) => ({
+      lat: p.latitude,
+      lon: p.longitude,
+    }));
+    const fixes = briefing.route.fixes
+      .filter((f) => f.coordinates)
+      .map((f) => ({
+        name: f.name,
+        lat: f.coordinates!.latitude,
+        lon: f.coordinates!.longitude,
+      }));
+    const sigmets = briefing.enroute.sigmets
+      .filter((s) => s.polygon && s.polygon.length >= 3)
+      .map((s) => ({
+        hazard: s.hazard,
+        points: s.polygon!.map((p) => ({ lat: p.latitude, lon: p.longitude })),
+      }));
+    const turbulence = briefing.enroute.turbulence
+      .map((t) => {
+        const fix = briefing.route.fixes.find((f) => f.name === t.fromFix);
+        if (!fix?.coordinates) return null;
+        return {
+          lat: fix.coordinates.latitude,
+          lon: fix.coordinates.longitude,
+          intensity: t.intensity,
+        };
+      })
+      .filter((v): v is NonNullable<typeof v> => v !== null);
+
+    const res = await fetch("/api/briefing-map", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path,
+        fixes,
+        sigmets,
+        turbulence,
+        radarTileUrl,
+      }),
+    });
+    if (!res.ok) {
+      console.warn("[pdf-map-capture] API map failed:", res.status);
+      return null;
+    }
+    const blob = await res.blob();
+    return await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  } catch (error) {
+    console.warn("[pdf-map-capture] API map error:", error);
+    return null;
+  }
+}
+
+async function captureOffscreen(
+  briefing: WeatherBriefing,
+  radar: string | null,
+  satellite: string | null,
+): Promise<string | null> {
   const host = document.createElement("div");
-  host.setAttribute("data-nb-pdf-map-capture", "true");
   host.style.cssText = [
     "position:fixed",
-    "left:-10000px",
+    "left:-12000px",
     "top:0",
     `width:${CAPTURE_WIDTH}px`,
     `height:${CAPTURE_HEIGHT}px`,
     "z-index:-1",
-    "opacity:1",
-    "pointer-events:none",
     "background:#0b0e13",
   ].join(";");
   document.body.appendChild(host);
@@ -133,7 +211,6 @@ export async function captureBriefingMapImage(
 
   const { departure, destination, alternate } = briefing.summary;
   const { route, enroute } = briefing;
-
   const map = L.map(mapNode, {
     zoomControl: false,
     attributionControl: false,
@@ -141,26 +218,18 @@ export async function captureBriefingMapImage(
   });
 
   try {
-    const base = L.tileLayer(
+    L.tileLayer(
       "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-      {
-        subdomains: "abcd",
-        maxZoom: 18,
-        crossOrigin: true,
-      },
-    );
-    base.addTo(map);
+      { subdomains: "abcd", maxZoom: 18, crossOrigin: true },
+    ).addTo(map);
 
-    const tiles = await fetchRainViewerTiles();
-    if (tiles.radar) {
-      L.tileLayer(tiles.radar, {
-        opacity: 0.55,
-        maxZoom: 12,
-        crossOrigin: true,
-      }).addTo(map);
+    if (radar) {
+      L.tileLayer(radar, { opacity: 0.55, maxZoom: 12, crossOrigin: true }).addTo(
+        map,
+      );
     }
-    if (tiles.satellite) {
-      L.tileLayer(tiles.satellite, {
+    if (satellite) {
+      L.tileLayer(satellite, {
         opacity: 0.35,
         maxZoom: 12,
         crossOrigin: true,
@@ -178,11 +247,11 @@ export async function captureBriefingMapImage(
       }).addTo(map);
     }
 
-    const jetStream = enroute.windsAloft
+    const jet = enroute.windsAloft
       .filter((s) => s.windSpeedKt >= JET_STREAM_KT)
       .map((s) => [s.point.latitude, s.point.longitude] as [number, number]);
-    if (jetStream.length > 1) {
-      L.polyline(jetStream, {
+    if (jet.length > 1) {
+      L.polyline(jet, {
         color: "#f472b6",
         weight: 4,
         opacity: 0.75,
@@ -193,9 +262,7 @@ export async function captureBriefingMapImage(
     for (const sigmet of enroute.sigmets) {
       if (!sigmet.polygon || sigmet.polygon.length < 3) continue;
       L.polygon(
-        sigmet.polygon.map(
-          (p) => [p.latitude, p.longitude] as [number, number],
-        ),
+        sigmet.polygon.map((p) => [p.latitude, p.longitude] as [number, number]),
         {
           color: sigmet.hazard === "CONVECTIVE" ? "#f97316" : "#eab308",
           weight: 1,
@@ -218,26 +285,22 @@ export async function captureBriefingMapImage(
     for (const turb of enroute.turbulence) {
       const fix = route.fixes.find((f) => f.name === turb.fromFix);
       if (!fix?.coordinates) continue;
-      L.circleMarker(
-        [fix.coordinates.latitude, fix.coordinates.longitude],
-        {
-          radius: turb.intensity === "NONE" ? 5 : 9,
-          color: turbColor(turb.intensity),
-          fillColor: turbColor(turb.intensity),
-          fillOpacity: 0.4,
-          weight: 1,
-        },
-      ).addTo(map);
+      L.circleMarker([fix.coordinates.latitude, fix.coordinates.longitude], {
+        radius: turb.intensity === "NONE" ? 5 : 9,
+        color: turbColor(turb.intensity),
+        fillColor: turbColor(turb.intensity),
+        fillOpacity: 0.4,
+        weight: 1,
+      }).addTo(map);
     }
 
-    const stations = [
+    for (const station of [
       { airport: departure, weather: briefing.departureWeather },
       { airport: destination, weather: briefing.destinationWeather },
       ...(alternate && briefing.alternateWeather
         ? [{ airport: alternate, weather: briefing.alternateWeather }]
         : []),
-    ];
-    for (const station of stations) {
+    ]) {
       L.circleMarker(
         [
           station.airport.coordinates.latitude,
@@ -267,37 +330,40 @@ export async function captureBriefingMapImage(
 
     if (pathLatLngs.length > 0) {
       map.fitBounds(L.latLngBounds(pathLatLngs).pad(0.18));
-    } else {
-      map.setView(
-        [
-          (departure.coordinates.latitude + destination.coordinates.latitude) /
-            2,
-          (departure.coordinates.longitude +
-            destination.coordinates.longitude) /
-            2,
-        ],
-        3,
-      );
     }
 
-    await waitForTiles(map);
-    // Extra settle for overlay tiles / labels.
-    await new Promise((r) => window.setTimeout(r, 700));
-
-    const dataUrl = await toPng(mapNode, {
-      width: CAPTURE_WIDTH,
-      height: CAPTURE_HEIGHT,
-      pixelRatio: 2,
-      cacheBust: true,
-      backgroundColor: "#0b0e13",
+    await new Promise<void>((resolve) => {
+      map.once("moveend", () => window.setTimeout(() => resolve(), 1000));
+      window.setTimeout(() => resolve(), 3500);
     });
+    await new Promise((r) => window.setTimeout(r, 800));
 
-    return dataUrl;
+    return await captureElement(mapNode);
   } catch (error) {
-    console.warn("[pdf-map-capture] failed:", error);
+    console.warn("[pdf-map-capture] offscreen failed:", error);
     return null;
   } finally {
     map.remove();
     host.remove();
   }
+}
+
+/**
+ * Produce a high-resolution map image for PDF embedding.
+ * Preference order: visible Leaflet map → server tile mosaic → offscreen Leaflet.
+ */
+export async function captureBriefingMapImage(
+  briefing: WeatherBriefing,
+): Promise<string | null> {
+  if (typeof document === "undefined") return null;
+
+  const tiles = await fetchRainViewerTiles();
+
+  const visible = await captureVisibleMap();
+  if (visible) return visible;
+
+  const api = await captureViaApi(briefing, tiles.radar);
+  if (api) return api;
+
+  return captureOffscreen(briefing, tiles.radar, tiles.satellite);
 }

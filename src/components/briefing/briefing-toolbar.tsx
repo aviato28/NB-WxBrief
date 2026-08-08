@@ -20,6 +20,11 @@ export function BriefingToolbar({
   async function handleExport(): Promise<void> {
     setExporting(true);
     try {
+      document
+        .querySelector("[data-nb-route-map]")
+        ?.scrollIntoView({ behavior: "instant", block: "center" });
+      await new Promise((r) => window.setTimeout(r, 350));
+
       const [{ pdf }, { BriefingPdfDocument }, { captureBriefingMapImage }] =
         await Promise.all([
           import("@react-pdf/renderer"),
@@ -62,7 +67,7 @@ export function BriefingToolbar({
       </Button>
       <Button size="sm" onClick={() => void handleExport()} disabled={exporting}>
         {exporting ? <Loader2 className="animate-spin" /> : <Download />}
-        Export PDF
+        {exporting ? "Building PDF…" : "Export PDF"}
       </Button>
     </div>
   );

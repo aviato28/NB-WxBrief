@@ -72,6 +72,19 @@ function cloudColor(pct: number): string {
   return "#475569";
 }
 
+function RegisterMap(): null {
+  const map = useMap();
+  useEffect(() => {
+    window.__NB_WXBRIEF_MAP__ = map;
+    return () => {
+      if (window.__NB_WXBRIEF_MAP__ === map) {
+        window.__NB_WXBRIEF_MAP__ = null;
+      }
+    };
+  }, [map]);
+  return null;
+}
+
 function FitRoute({ points }: { readonly points: readonly [number, number][] }) {
   const map = useMap();
   useEffect(() => {
@@ -266,7 +279,10 @@ export function RouteMap({
         ))}
       </div>
 
-      <div className="overflow-hidden rounded-md border border-border/80">
+      <div
+        data-nb-route-map
+        className="overflow-hidden rounded-md border border-border/80"
+      >
         <MapContainer
           center={center}
           zoom={MAP_DEFAULT_ZOOM}
@@ -274,15 +290,27 @@ export function RouteMap({
           className="h-80 w-full sm:h-[28rem]"
           attributionControl
         >
+          <RegisterMap />
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>'
             url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            crossOrigin={true}
           />
           {overlays.radar && radarPath ? (
-            <TileLayer url={radarPath} opacity={0.55} zIndex={200} />
+            <TileLayer
+              url={radarPath}
+              opacity={0.55}
+              zIndex={200}
+              crossOrigin={true}
+            />
           ) : null}
           {overlays.satellite && satellitePath ? (
-            <TileLayer url={satellitePath} opacity={0.45} zIndex={190} />
+            <TileLayer
+              url={satellitePath}
+              opacity={0.45}
+              zIndex={190}
+              crossOrigin={true}
+            />
           ) : null}
           <FitRoute points={pathLatLngs} />
 

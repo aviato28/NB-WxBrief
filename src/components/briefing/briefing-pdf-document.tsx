@@ -346,7 +346,7 @@ const s = StyleSheet.create({
   },
   mapImage: {
     width: "100%",
-    height: 368,
+    height: 400,
     objectFit: "cover",
   },
   mapFooter: {
