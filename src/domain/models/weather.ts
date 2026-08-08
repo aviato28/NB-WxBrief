@@ -129,10 +129,18 @@ export interface TurbulenceAssessment {
   readonly fromFix: string;
   readonly toFix: string;
   readonly intensity: TurbulenceIntensity;
-  /** Absolute FL for this assessment (cruise, cruise−40, or cruise+40). */
+  /** Absolute FL for this assessment. */
   readonly flightLevel: number;
-  /** Relative to the filed cruise level. */
+  /**
+   * Coarse bucket relative to cruise: below (&lt;0), cruise (0), above (&gt;0).
+   * Prefer `altitudeOffsetFl` for 1000 ft ladder rows.
+   */
   readonly altitudeBand: TurbulenceAltitudeBand;
+  /**
+   * Offset from cruise in FL units (10 = 1000 ft).
+   * Example at cruise FL340: −40…+40 → FL300…FL380.
+   */
+  readonly altitudeOffsetFl: number;
   readonly flightLevelBand: string;
   readonly expectedDuration: string;
   readonly likelyCause: TurbulenceCause;

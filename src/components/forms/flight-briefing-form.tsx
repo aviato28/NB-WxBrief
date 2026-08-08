@@ -123,7 +123,7 @@ export function FlightBriefingForm() {
 
         <Field
           id="flightLevel"
-          label={`Cruise FL (${MIN_FLIGHT_LEVEL}–${MAX_FLIGHT_LEVEL}) · turb ±4000 ft`}
+          label={`Cruise FL (${MIN_FLIGHT_LEVEL}–${MAX_FLIGHT_LEVEL}) · turb ±4000 ft / 1000 ft`}
           error={form.formState.errors.flightLevel?.message}
         >
           <Input
@@ -193,7 +193,7 @@ export function FlightBriefingForm() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-muted-foreground">
           Winds and turbulence are timed from your ETD and assessed at cruise
-          FL ±4000 ft.
+          FL ±1000/2000/3000/4000 ft.
         </p>
         <Button
           type="submit"

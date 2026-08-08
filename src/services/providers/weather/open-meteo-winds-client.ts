@@ -3,6 +3,7 @@ import {
   estimateSampleTimeUtc,
   flightLevelToPressureHpa,
   neighboringPressureLevels,
+  pressureHpaToApproxFlightLevel,
   toOpenMeteoHour,
   verticalShearKtPer1000Ft,
 } from "@/lib/aviation-geo";
@@ -111,14 +112,11 @@ export class OpenMeteoWindsClient {
         const hourIndex = pickHourIndex(payload.hourly.time, validAt);
 
         for (const fl of uniqueLevels) {
-          const hpa = pressureByFl.get(fl) ?? flightLevelToPressureHpa(fl);
-          const levels = neighboringPressureLevels(hpa);
           const parsed = this.parseLevels(
             payload,
             sample.point,
             fl,
-            hpa,
-            levels,
+            allHpa,
             hourIndex,
           );
           if (!parsed) continue;
@@ -201,49 +199,107 @@ export class OpenMeteoWindsClient {
     });
   }
 
+  /**
+   * Build a winds sample at an exact FL by interpolating between Open-Meteo
+   * pressure surfaces (so 1000 ft steps are not identical when they share a
+   * nearest discrete hPa level).
+   */
   private parseLevels(
     payload: OpenMeteoHourlyResponse,
     point: GeoPoint,
     flightLevel: number,
-    hpa: number,
-    levels: readonly number[],
+    availableHpa: readonly number[],
     hourIndex: number,
   ): { wind: WindsAloftSample; shear: number | null } | null {
-    const speed = Number(
-      payload.hourly?.[`wind_speed_${hpa}hPa`]?.[hourIndex] ?? NaN,
-    );
-    const direction = Number(
-      payload.hourly?.[`wind_direction_${hpa}hPa`]?.[hourIndex] ?? NaN,
-    );
-    const temperature = Number(
-      payload.hourly?.[`temperature_${hpa}hPa`]?.[hourIndex] ?? NaN,
-    );
-    const cloud = Number(payload.hourly?.cloud_cover?.[hourIndex] ?? NaN);
+    type Surface = {
+      hpa: number;
+      fl: number;
+      speed: number;
+      direction: number;
+      temperature: number;
+    };
 
-    let shear: number | null = null;
-    if (levels.length >= 2) {
-      const lower = levels[0] ?? hpa;
-      const upper = levels[levels.length - 1] ?? hpa;
-      const lowerSpeed = Number(
-        payload.hourly?.[`wind_speed_${lower}hPa`]?.[hourIndex] ?? NaN,
+    const surfaces: Surface[] = [];
+    for (const hpa of availableHpa) {
+      const speed = Number(
+        payload.hourly?.[`wind_speed_${hpa}hPa`]?.[hourIndex] ?? NaN,
       );
-      const upperSpeed = Number(
-        payload.hourly?.[`wind_speed_${upper}hPa`]?.[hourIndex] ?? NaN,
+      const direction = Number(
+        payload.hourly?.[`wind_direction_${hpa}hPa`]?.[hourIndex] ?? NaN,
       );
-      if (Number.isFinite(lowerSpeed) && Number.isFinite(upperSpeed)) {
-        // Previous /3.4 hPa heuristic overstated layer thickness (~3–4×) and
-        // systematically under-called CAT. Use approx FL thickness instead.
-        shear = verticalShearKtPer1000Ft(
-          lower,
-          upper,
-          lowerSpeed,
-          upperSpeed,
-        );
+      const temperature = Number(
+        payload.hourly?.[`temperature_${hpa}hPa`]?.[hourIndex] ?? NaN,
+      );
+      if (!Number.isFinite(speed) || !Number.isFinite(direction)) continue;
+      surfaces.push({
+        hpa,
+        fl: pressureHpaToApproxFlightLevel(hpa),
+        speed,
+        direction,
+        temperature: Number.isFinite(temperature) ? temperature : 0,
+      });
+    }
+    surfaces.sort((a, b) => a.fl - b.fl);
+    if (surfaces.length === 0) return null;
+
+    let lo = surfaces[0]!;
+    let hi = surfaces[surfaces.length - 1]!;
+    for (let i = 0; i < surfaces.length - 1; i += 1) {
+      const a = surfaces[i]!;
+      const b = surfaces[i + 1]!;
+      if (flightLevel >= a.fl && flightLevel <= b.fl) {
+        lo = a;
+        hi = b;
+        break;
+      }
+      if (flightLevel < a.fl) {
+        lo = a;
+        hi = a;
+        break;
+      }
+      if (flightLevel > b.fl) {
+        lo = b;
+        hi = b;
       }
     }
 
-    if (!Number.isFinite(speed) || !Number.isFinite(direction)) {
-      return null;
+    const span = Math.max(1, hi.fl - lo.fl);
+    const t = lo === hi ? 0 : (flightLevel - lo.fl) / span;
+    const speed = lo.speed + (hi.speed - lo.speed) * t;
+    const temperature = lo.temperature + (hi.temperature - lo.temperature) * t;
+    // Circular lerp for wind direction.
+    const d0 = lo.direction;
+    const d1 = hi.direction;
+    const delta = ((d1 - d0 + 540) % 360) - 180;
+    const direction = (d0 + delta * t + 360) % 360;
+
+    const cloud = Number(payload.hourly?.cloud_cover?.[hourIndex] ?? NaN);
+
+    // Local shear from the bracketing surfaces (or nearest neighbors).
+    let shear: number | null = null;
+    if (lo.hpa !== hi.hpa) {
+      shear = verticalShearKtPer1000Ft(lo.hpa, hi.hpa, lo.speed, hi.speed);
+    } else {
+      const nearest = flightLevelToPressureHpa(flightLevel);
+      const neighbors = neighboringPressureLevels(nearest);
+      if (neighbors.length >= 2) {
+        const lower = neighbors[0]!;
+        const upper = neighbors[neighbors.length - 1]!;
+        const lowerSpeed = Number(
+          payload.hourly?.[`wind_speed_${lower}hPa`]?.[hourIndex] ?? NaN,
+        );
+        const upperSpeed = Number(
+          payload.hourly?.[`wind_speed_${upper}hPa`]?.[hourIndex] ?? NaN,
+        );
+        if (Number.isFinite(lowerSpeed) && Number.isFinite(upperSpeed)) {
+          shear = verticalShearKtPer1000Ft(
+            lower,
+            upper,
+            lowerSpeed,
+            upperSpeed,
+          );
+        }
+      }
     }
 
     return {
@@ -254,7 +310,7 @@ export class OpenMeteoWindsClient {
         flightLevel,
         windDirectionDeg: Math.round(direction),
         windSpeedKt: Math.round(speed),
-        temperatureC: Number.isFinite(temperature) ? Math.round(temperature) : 0,
+        temperatureC: Math.round(temperature),
         shearProxyKtPer1000Ft:
           shear === null ? null : Math.round(shear * 10) / 10,
         cloudCoverPct: Number.isFinite(cloud) ? Math.round(cloud) : null,

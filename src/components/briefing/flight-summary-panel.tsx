@@ -56,7 +56,7 @@ export function FlightSummaryPanel({
         <SummaryItem
           label="Cruise"
           value={formatFlightLevel(summary.flightLevel)}
-          hint={`${summary.routeDistanceNm.toLocaleString()} NM · ±4000 ft turb`}
+          hint={`${summary.routeDistanceNm.toLocaleString()} NM · ±4000 ft / 1k steps`}
         />
         <SummaryItem
           label="Generated"

@@ -11,12 +11,15 @@ import type {
   AirportWeather,
 } from "@/domain/models/weather";
 import type { ParsedRoute } from "@/domain/models/route";
-import { TURBULENCE_ALTITUDE_OFFSET_FL } from "@/domain/constants/app";
+import {
+  TURBULENCE_ALTITUDE_OFFSET_FL,
+  TURBULENCE_ALTITUDE_STEP_FL,
+} from "@/domain/constants/app";
 import {
   MAX_FLIGHT_LEVEL,
   MIN_FLIGHT_LEVEL,
 } from "@/domain/schemas/flight-request";
-import { cruiseAltitudeBands } from "@/lib/aviation-geo";
+import { cruiseAltitudeLadder } from "@/lib/aviation-geo";
 import { formatFlightLevel } from "@/lib/format";
 
 function intensityFromShear(shear: number | null): TurbulenceIntensity {
@@ -48,6 +51,11 @@ function worseIntensity(
   return rank[a] >= rank[b] ? a : b;
 }
 
+function bandFromOffset(offsetFl: number): TurbulenceAltitudeBand {
+  if (offsetFl < 0) return "below";
+  if (offsetFl > 0) return "above";
+  return "cruise";
+}
 
 function causeFromContext(
   intensity: TurbulenceIntensity,
@@ -90,11 +98,12 @@ function pilotPhrase(intensity: TurbulenceIntensity): string {
   }
 }
 
-function bandLabel(band: TurbulenceAltitudeBand, fl: number): string {
+function bandLabel(offsetFl: number, fl: number): string {
   const abs = formatFlightLevel(fl);
-  if (band === "cruise") return `${abs} (cruise)`;
-  if (band === "below") return `${abs} (−4000 ft)`;
-  return `${abs} (+4000 ft)`;
+  if (offsetFl === 0) return `${abs} (cruise)`;
+  const feet = Math.abs(offsetFl) * 100;
+  const sign = offsetFl < 0 ? "−" : "+";
+  return `${abs} (${sign}${feet} ft)`;
 }
 
 export function buildTurbulenceBriefing(input: {
@@ -104,20 +113,13 @@ export function buildTurbulenceBriefing(input: {
   sigmets: readonly Sigmet[];
 }): readonly TurbulenceAssessment[] {
   const { route, winds, flightLevel, sigmets } = input;
-  const bands = cruiseAltitudeBands(
+  const ladder = cruiseAltitudeLadder(
     flightLevel,
     TURBULENCE_ALTITUDE_OFFSET_FL,
+    TURBULENCE_ALTITUDE_STEP_FL,
     MIN_FLIGHT_LEVEL,
     MAX_FLIGHT_LEVEL,
   );
-  const bandDefs: Array<{
-    band: TurbulenceAltitudeBand;
-    fl: number;
-  }> = [
-    { band: "below", fl: bands.below },
-    { band: "cruise", fl: bands.cruise },
-    { band: "above", fl: bands.above },
-  ];
 
   const turbSigmets = sigmets.filter((s) => s.hazard === "TURB");
   const assessments: TurbulenceAssessment[] = [];
@@ -129,7 +131,7 @@ export function buildTurbulenceBriefing(input: {
       continue;
     }
 
-    for (const { band, fl } of bandDefs) {
+    for (const { offsetFl, fl } of ladder) {
       const levelWinds = winds.filter((sample) => sample.flightLevel === fl);
       const legWinds = levelWinds.filter((sample) => {
         const nearFrom =
@@ -177,7 +179,7 @@ export function buildTurbulenceBriefing(input: {
 
       const cause = causeFromContext(intensity, maxWind, convectiveNearby);
       const confidence = confidenceFrom(intensity, sigmetHit);
-      const flBand = bandLabel(band, fl);
+      const flBand = bandLabel(offsetFl, fl);
       const phrase = pilotPhrase(intensity);
       const causeText =
         cause === "JET_STREAM_SHEAR"
@@ -200,7 +202,8 @@ export function buildTurbulenceBriefing(input: {
         toFix: leg.to.name,
         intensity,
         flightLevel: fl,
-        altitudeBand: band,
+        altitudeBand: bandFromOffset(offsetFl),
+        altitudeOffsetFl: offsetFl,
         flightLevelBand: flBand,
         expectedDuration: durationForDistance(leg.distanceNm),
         likelyCause: cause,
@@ -228,8 +231,14 @@ export function buildDispatchBullets(input: {
   route: ParsedRoute;
 }): readonly string[] {
   const bullets: string[] = [];
+  const rank: Record<TurbulenceIntensity, number> = {
+    NONE: 0,
+    LIGHT: 1,
+    MODERATE: 2,
+    SEVERE: 3,
+  };
 
-  const cruiseTurb = input.turbulence.filter((t) => t.altitudeBand === "cruise");
+  const cruiseTurb = input.turbulence.filter((t) => t.altitudeOffsetFl === 0);
   const modTurb = cruiseTurb.filter(
     (t) => t.intensity === "MODERATE" || t.intensity === "SEVERE",
   );
@@ -239,29 +248,24 @@ export function buildDispatchBullets(input: {
     );
   }
 
-  // Highlight when an offset level is smoother or worse than cruise.
+  // Prefer the smoothest alternate level within ±4000 ft (1000 ft steps).
   for (const cruise of modTurb.slice(0, 2)) {
-    const below = input.turbulence.find(
+    const alts = input.turbulence.filter(
       (t) =>
-        t.segmentLabel === cruise.segmentLabel && t.altitudeBand === "below",
+        t.segmentLabel === cruise.segmentLabel && t.altitudeOffsetFl !== 0,
     );
-    const above = input.turbulence.find(
-      (t) =>
-        t.segmentLabel === cruise.segmentLabel && t.altitudeBand === "above",
-    );
-    const rank: Record<TurbulenceIntensity, number> = {
-      NONE: 0,
-      LIGHT: 1,
-      MODERATE: 2,
-      SEVERE: 3,
-    };
-    if (below && rank[below.intensity] < rank[cruise.intensity]) {
+    const smoother = alts
+      .filter((t) => rank[t.intensity] < rank[cruise.intensity])
+      .sort(
+        (a, b) =>
+          rank[a.intensity] - rank[b.intensity] ||
+          Math.abs(a.altitudeOffsetFl) - Math.abs(b.altitudeOffsetFl),
+      )[0];
+    if (smoother) {
+      const feet = Math.abs(smoother.altitudeOffsetFl) * 100;
+      const sign = smoother.altitudeOffsetFl < 0 ? "−" : "+";
       bullets.push(
-        `Smoother ride likely ${formatFlightLevel(below.flightLevel)} (−4000 ft) on ${cruise.segmentLabel}.`,
-      );
-    } else if (above && rank[above.intensity] < rank[cruise.intensity]) {
-      bullets.push(
-        `Smoother ride likely ${formatFlightLevel(above.flightLevel)} (+4000 ft) on ${cruise.segmentLabel}.`,
+        `Smoother ride likely ${formatFlightLevel(smoother.flightLevel)} (${sign}${feet} ft) on ${cruise.segmentLabel}.`,
       );
     }
   }
@@ -327,7 +331,9 @@ export function buildDispatchBullets(input: {
   }
 
   if (bullets.length === 0) {
-    bullets.push("No significant enroute weather threats identified from current products.");
+    bullets.push(
+      "No significant enroute weather threats identified from current products.",
+    );
   }
 
   return bullets;
@@ -342,7 +348,7 @@ export function buildWaypointConditions(input: {
 }): readonly WaypointCondition[] {
   const cruiseFl =
     input.cruiseFlightLevel ??
-    input.turbulence.find((t) => t.altitudeBand === "cruise")?.flightLevel ??
+    input.turbulence.find((t) => t.altitudeOffsetFl === 0)?.flightLevel ??
     input.winds[0]?.flightLevel;
 
   return input.route.fixes.flatMap((fix) => {
@@ -363,7 +369,7 @@ export function buildWaypointConditions(input: {
       input.turbulence.find(
         (t) =>
           (t.fromFix === fix.name || t.toFix === fix.name) &&
-          t.altitudeBand === "cruise",
+          t.altitudeOffsetFl === 0,
       )?.intensity ??
       input.turbulence.find(
         (t) => t.fromFix === fix.name || t.toFix === fix.name,

@@ -15,14 +15,14 @@ export function EnrouteSection({
   readonly enroute: EnrouteWeather;
 }) {
   const cruiseFl =
-    enroute.turbulence.find((t) => t.altitudeBand === "cruise")?.flightLevel ??
+    enroute.turbulence.find((t) => t.altitudeOffsetFl === 0)?.flightLevel ??
     enroute.windsAloft.find(() => true)?.flightLevel;
 
   const cruiseWinds = cruiseFl
     ? enroute.windsAloft.filter((w) => w.flightLevel === cruiseFl)
     : enroute.windsAloft;
 
-  // Group turbulence by segment for a compact ±4000 ft comparison.
+  // Group turbulence by segment for a compact ±4000 ft / 1000 ft ladder.
   const segments = Array.from(
     new Map(
       enroute.turbulence.map((t) => [t.segmentLabel, t.segmentLabel] as const),
@@ -114,34 +114,38 @@ export function EnrouteSection({
 
       <div>
         <h3 className="efb-label mb-2">
-          Turbulence briefing · cruise ±4000 ft
+          Turbulence briefing · cruise ±4000 ft · 1000 ft steps
         </h3>
         <p className="mb-3 text-xs text-muted-foreground">
           Advisory only — derived from Open-Meteo wind shear/jet cues plus route
           SIGMETs. Not a certified PIREP or GTG product; verify operationally.
+          Levels are cruise ±1000/2000/3000/4000 ft.
         </p>
         <div className="space-y-3">
           {segments.map((segment) => {
-            const items = enroute.turbulence.filter(
-              (t) => t.segmentLabel === segment,
-            );
-            const ordered = ["below", "cruise", "above"].map(
-              (band) => items.find((t) => t.altitudeBand === band) ?? null,
-            );
+            const items = enroute.turbulence
+              .filter((t) => t.segmentLabel === segment)
+              .slice()
+              .sort((a, b) => a.altitudeOffsetFl - b.altitudeOffsetFl);
             return (
               <article
                 key={segment}
                 className="rounded-md border border-border/60 bg-muted/30 px-3 py-3"
               >
                 <p className="mb-2 text-sm font-semibold">{segment}</p>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {ordered.map((item) => {
-                    if (!item) return null;
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+                  {items.map((item) => {
                     const style = TURBULENCE_STYLES[item.intensity];
+                    const isCruise = item.altitudeOffsetFl === 0;
                     return (
                       <div
-                        key={`${item.segmentLabel}-${item.altitudeBand}`}
-                        className="rounded border border-border/50 bg-background/40 px-2 py-2"
+                        key={`${item.segmentLabel}-${item.altitudeOffsetFl}`}
+                        className={cn(
+                          "rounded border px-2 py-2",
+                          isCruise
+                            ? "border-primary/50 bg-primary/5"
+                            : "border-border/50 bg-background/40",
+                        )}
                       >
                         <div className="mb-1 flex flex-wrap items-center gap-1.5">
                           <span
