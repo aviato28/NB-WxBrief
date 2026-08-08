@@ -21,8 +21,11 @@ export const UPSTREAM_CACHE_TTL_MS = 60_000;
 
 export const PDF_PAGE_MARGIN_PT = 28;
 
-/** ±4000 ft around cruise FL for multi-level turbulence/winds (FL units). */
+/** Max ± offset around cruise FL for turbulence/winds (FL units; 40 = 4000 ft). */
 export const TURBULENCE_ALTITUDE_OFFSET_FL = 40;
+
+/** Step between turb/wind sample levels (FL units; 10 = 1000 ft). */
+export const TURBULENCE_ALTITUDE_STEP_FL = 10;
 
 /** Assumed groundspeed (kt) for ETD → enroute sample timing. */
 export const BRIEFING_ASSUMED_GROUNDSPEED_KT = 450;

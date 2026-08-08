@@ -134,7 +134,35 @@ export function verticalShearKtPer1000Ft(
 }
 
 /**
- * Cruise FL ± offset (default 40 = 4000 ft), clamped to jet FL envelope.
+ * Cruise FL ± maxOffset in `stepFl` increments (default ±4000 ft / 1000 ft),
+ * clamped to the jet FL envelope. Includes cruise (offset 0).
+ * Example: cruise 340 → FL300,310,…,380.
+ */
+export function cruiseAltitudeLadder(
+  cruiseFl: number,
+  maxOffsetFl: number,
+  stepFl: number,
+  minFl: number,
+  maxFl: number,
+): ReadonlyArray<{ readonly offsetFl: number; readonly fl: number }> {
+  const step = Math.max(1, Math.abs(stepFl));
+  const maxOffset = Math.max(0, Math.abs(maxOffsetFl));
+  const out: Array<{ offsetFl: number; fl: number }> = [];
+  for (let offset = -maxOffset; offset <= maxOffset; offset += step) {
+    const fl = cruiseFl + offset;
+    if (fl < minFl || fl > maxFl) continue;
+    out.push({ offsetFl: offset, fl });
+  }
+  // Always include cruise if it was clamped out of the loop somehow.
+  if (!out.some((row) => row.offsetFl === 0) && cruiseFl >= minFl && cruiseFl <= maxFl) {
+    out.push({ offsetFl: 0, fl: cruiseFl });
+    out.sort((a, b) => a.offsetFl - b.offsetFl);
+  }
+  return out;
+}
+
+/**
+ * Extreme below / cruise / above for callers that only need the ±max envelope.
  */
 export function cruiseAltitudeBands(
   cruiseFl: number,
@@ -142,11 +170,18 @@ export function cruiseAltitudeBands(
   minFl: number,
   maxFl: number,
 ): { readonly below: number; readonly cruise: number; readonly above: number } {
-  return {
-    below: Math.max(minFl, cruiseFl - offsetFl),
-    cruise: cruiseFl,
-    above: Math.min(maxFl, cruiseFl + offsetFl),
-  };
+  const ladder = cruiseAltitudeLadder(
+    cruiseFl,
+    offsetFl,
+    offsetFl,
+    minFl,
+    maxFl,
+  );
+  const cruise = cruiseFl;
+  const below = ladder[0]?.fl ?? Math.max(minFl, cruiseFl - offsetFl);
+  const above =
+    ladder[ladder.length - 1]?.fl ?? Math.min(maxFl, cruiseFl + offsetFl);
+  return { below, cruise, above };
 }
 
 /** Estimate UTC time when a route sample is overflown. */

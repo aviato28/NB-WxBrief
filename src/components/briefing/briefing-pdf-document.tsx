@@ -1194,21 +1194,23 @@ export function BriefingPdfDocument({
             ))}
           </View>
 
-          <Section title="7. Turbulence briefing" hint="Cruise ±4000 ft" />
+          <Section
+            title="7. Turbulence briefing"
+            hint="Cruise ±4000 ft · 1000 ft steps"
+          />
           {turbSegments.map((segment) => {
-            const items = enroute.turbulence.filter(
-              (t) => t.segmentLabel === segment,
-            );
+            const items = enroute.turbulence
+              .filter((t) => t.segmentLabel === segment)
+              .slice()
+              .sort((a, b) => a.altitudeOffsetFl - b.altitudeOffsetFl);
             return (
               <View key={segment} style={s.turbCard} wrap={false}>
                 <Text style={[s.turbSeg, { marginBottom: 4 }]}>{segment}</Text>
-                {(["below", "cruise", "above"] as const).map((band) => {
-                  const turb = items.find((t) => t.altitudeBand === band);
-                  if (!turb) return null;
+                {items.map((turb) => {
                   const tone = turbTone(turb.intensity);
                   return (
                     <View
-                      key={`${segment}-${band}`}
+                      key={`${segment}-${turb.altitudeOffsetFl}`}
                       style={{
                         flexDirection: "row",
                         alignItems: "center",

@@ -9,12 +9,13 @@ import type { ParsedRoute } from "@/domain/models/route";
 import {
   BRIEFING_ASSUMED_GROUNDSPEED_KT,
   TURBULENCE_ALTITUDE_OFFSET_FL,
+  TURBULENCE_ALTITUDE_STEP_FL,
 } from "@/domain/constants/app";
 import {
   MAX_FLIGHT_LEVEL,
   MIN_FLIGHT_LEVEL,
 } from "@/domain/schemas/flight-request";
-import { cruiseAltitudeBands, routeIntersectsSigmet } from "@/lib/aviation-geo";
+import { cruiseAltitudeLadder, routeIntersectsSigmet } from "@/lib/aviation-geo";
 import { fetchJson, fetchJsonSoft } from "@/lib/http";
 import {
   buildAirportWeatherBundle,
@@ -116,13 +117,15 @@ export class AwcWeatherProvider implements WeatherProvider {
       ...(query.route?.pathPoints ?? query.routePoints ?? []),
     ];
 
-    const bands = cruiseAltitudeBands(
+    const ladder = cruiseAltitudeLadder(
       query.flightLevel,
       TURBULENCE_ALTITUDE_OFFSET_FL,
+      TURBULENCE_ALTITUDE_STEP_FL,
       MIN_FLIGHT_LEVEL,
       MAX_FLIGHT_LEVEL,
     );
-    const flightLevels = [bands.below, bands.cruise, bands.above];
+    const flightLevels = ladder.map((row) => row.fl);
+    const cruiseFl = query.flightLevel;
 
     const windowStart = Date.parse(query.departureTimeUtc);
     const etaMs =
@@ -228,9 +231,11 @@ export class AwcWeatherProvider implements WeatherProvider {
       sigmets,
     });
 
+    const flLo = ladder[0]?.fl ?? cruiseFl;
+    const flHi = ladder[ladder.length - 1]?.fl ?? cruiseFl;
     const alongRouteNotes = [
       `Winds/turbulence timed from ETD ${query.departureTimeUtc.slice(0, 16).replace("T", " ")}Z along the filed route.`,
-      `Sampled FL${bands.below} (−4000 ft), FL${bands.cruise} (cruise), and FL${bands.above} (+4000 ft) via Open-Meteo (advisory).`,
+      `Sampled ${ladder.length} levels FL${flLo}–FL${flHi} in 1000 ft steps (±4000 ft around cruise FL${cruiseFl}) via Open-Meteo (advisory).`,
       `Route distance ${Math.round(route.totalDistanceNm).toLocaleString()} NM across ${route.legs.length} leg(s).`,
     ];
 
@@ -245,7 +250,7 @@ export class AwcWeatherProvider implements WeatherProvider {
         "Winds aloft samples unavailable; verify with official FD / company winds.",
       );
     } else {
-      const cruiseWinds = winds.filter((w) => w.flightLevel === bands.cruise);
+      const cruiseWinds = winds.filter((w) => w.flightLevel === cruiseFl);
       const pool = cruiseWinds.length > 0 ? cruiseWinds : winds;
       const maxWind = Math.max(...pool.map((sample) => sample.windSpeedKt));
       alongRouteNotes.push(`Peak sampled wind @ cruise ≈ ${maxWind} kt.`);
@@ -264,7 +269,7 @@ export class AwcWeatherProvider implements WeatherProvider {
       winds,
       turbulence,
       sigmets,
-      cruiseFlightLevel: bands.cruise,
+      cruiseFlightLevel: cruiseFl,
     });
 
     const dispatchBullets = buildDispatchBullets({
@@ -291,9 +296,10 @@ export class AwcWeatherProvider implements WeatherProvider {
                 fromFix: query.departureIcao,
                 toFix: query.destinationIcao,
                 intensity: "NONE" as const,
-                flightLevel: bands.cruise,
+                flightLevel: cruiseFl,
                 altitudeBand: "cruise" as const,
-                flightLevelBand: `FL${bands.cruise} (cruise)`,
+                altitudeOffsetFl: 0,
+                flightLevelBand: `FL${cruiseFl} (cruise)`,
                 expectedDuration: "Entire route",
                 likelyCause: "UNKNOWN" as const,
                 confidence: "LOW" as const,
