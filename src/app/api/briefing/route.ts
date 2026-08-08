@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import { flightBriefingRequestSchema } from "@/domain/schemas/flight-request";
-import { defaultDepartureTimeUtc, toFlightRequest } from "@/lib/flight-request";
+import {
+  flightBriefingRequestSchema,
+  normalizeDepartureTimeUtc,
+} from "@/domain/schemas/flight-request";
+import { toFlightRequest } from "@/lib/flight-request";
 import {
   BriefingError,
   getBriefingService,
@@ -24,16 +27,23 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
-  // Back-compat: older clients may omit ETD
-  const normalized =
+  const raw =
     body && typeof body === "object"
-      ? {
-          ...(body as Record<string, unknown>),
-          departureTimeUtc:
-            (body as { departureTimeUtc?: unknown }).departureTimeUtc ||
-            defaultDepartureTimeUtc(),
-        }
-      : body;
+      ? (body as Record<string, unknown>)
+      : ({} as Record<string, unknown>);
+
+  // Always coerce ETD so briefings never fail on departure-time alone.
+  const normalized = {
+    ...raw,
+    departureTimeUtc: normalizeDepartureTimeUtc(raw.departureTimeUtc),
+    alternateIcao:
+      raw.alternateIcao == null ? "" : String(raw.alternateIcao),
+    flightNumber: raw.flightNumber == null ? "" : String(raw.flightNumber),
+    aircraftRegistration:
+      raw.aircraftRegistration == null
+        ? ""
+        : String(raw.aircraftRegistration),
+  };
 
   const parsed = flightBriefingRequestSchema.safeParse(normalized);
   if (!parsed.success) {
@@ -43,7 +53,7 @@ export async function POST(request: Request): Promise<NextResponse> {
         error: {
           code: "INVALID_REQUEST",
           message: firstIssue
-            ? `Flight request validation failed: ${firstIssue.path.join(".")} — ${firstIssue.message}`
+            ? `Flight request validation failed: ${firstIssue.path.join(".") || "request"} — ${firstIssue.message}`
             : "Flight request validation failed.",
           details: parsed.error.flatten(),
         },
