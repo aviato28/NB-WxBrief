@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertCircle, Loader2 } from "lucide-react";
+import Link from "next/link";
 import { AirportWeatherSection } from "@/components/briefing/airport-weather-section";
 import { BriefingToolbar } from "@/components/briefing/briefing-toolbar";
 import { EnrouteSection } from "@/components/briefing/enroute-section";
@@ -39,13 +40,18 @@ export function BriefingView({
         <AlertTitle>Briefing failed</AlertTitle>
         <AlertDescription className="flex flex-col gap-3">
           <span>{message}</span>
-          <button
-            type="button"
-            className="w-fit text-sm underline"
-            onClick={() => void query.refetch()}
-          >
-            Retry
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              className="w-fit text-sm underline"
+              onClick={() => void query.refetch()}
+            >
+              Retry
+            </button>
+            <Link href="/" className="w-fit text-sm underline">
+              New brief
+            </Link>
+          </div>
         </AlertDescription>
       </Alert>
     );

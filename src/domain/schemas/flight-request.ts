@@ -35,37 +35,56 @@ export const MIN_FLIGHT_LEVEL = 180;
 export const MAX_FLIGHT_LEVEL = 450;
 export const FLIGHT_LEVEL_STEP = 10;
 
+function defaultEtdIso(): string {
+  const d = new Date(Date.now() + 90 * 60_000);
+  d.setUTCMinutes(0, 0, 0);
+  d.setUTCHours(d.getUTCHours() + 1);
+  return d.toISOString();
+}
+
+/** Normalize any ETD-ish input to a UTC ISO string; never throw — fall back to default. */
+export function normalizeDepartureTimeUtc(raw: unknown): string {
+  if (raw == null) return defaultEtdIso();
+  const value = String(raw).trim();
+  if (!value || value === "undefined" || value === "null") {
+    return defaultEtdIso();
+  }
+
+  let candidate = value;
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(candidate)) {
+    candidate = `${candidate}:00.000Z`;
+  } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/i.test(candidate)) {
+    // already ISO with Z
+  } else if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(candidate)) {
+    candidate = `${candidate}Z`;
+  } else if (candidate.includes(" ")) {
+    candidate = candidate.replace(" ", "T").replace(/ /g, ":");
+    if (!candidate.endsWith("Z") && !/[+-]\d{2}:?\d{2}$/.test(candidate)) {
+      candidate = `${candidate}Z`;
+    }
+  }
+
+  const ms = Date.parse(candidate);
+  if (Number.isNaN(ms)) {
+    return defaultEtdIso();
+  }
+  const date = new Date(ms);
+  const year = date.getUTCFullYear();
+  // Guard absurd parses (e.g. Date.parse("12345"))
+  if (year < 2020 || year > 2100) {
+    return defaultEtdIso();
+  }
+  return date.toISOString();
+}
+
 /**
  * Accepts datetime-local (`YYYY-MM-DDTHH:mm`) or full ISO; normalizes to UTC ISO.
- * Form values are treated as UTC (field is labeled Departure time UTC).
- * Empty / missing values default to the next briefing ETD so older URLs still work.
+ * Invalid / missing values silently default so briefings never die on ETD alone.
  */
-export const departureTimeUtcSchema = z
-  .string()
-  .trim()
-  .transform((value) => {
-    if (!value) {
-      // Lazy default — keep schema pure of Date.now at module load
-      const d = new Date(Date.now() + 90 * 60_000);
-      d.setUTCMinutes(0, 0, 0);
-      d.setUTCHours(d.getUTCHours() + 1);
-      return d.toISOString();
-    }
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
-      return `${value}:00.000Z`;
-    }
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value)) {
-      return value.endsWith("Z") ? value : `${value}Z`;
-    }
-    // URLSearchParams may turn `:` into spaces in some edge clients — restore
-    const restored = value.includes(" ")
-      ? value.replace(" ", "T").replace(/ /g, ":")
-      : value;
-    return restored;
-  })
-  .refine((value) => !Number.isNaN(Date.parse(value)), {
-    message: "Enter a valid departure date/time",
-  });
+export const departureTimeUtcSchema = z.preprocess(
+  (raw) => normalizeDepartureTimeUtc(raw),
+  z.string().min(1),
+);
 
 export const flightBriefingRequestSchema = z
   .object({

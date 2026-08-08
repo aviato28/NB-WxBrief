@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { WeatherBriefing } from "@/domain/models/briefing";
 import type { FlightRequest } from "@/domain/models/route";
+import { normalizeDepartureTimeUtc } from "@/domain/schemas/flight-request";
 
 const briefingErrorSchema = z.object({
   error: z.object({
@@ -36,7 +37,7 @@ export async function fetchBriefing(
       alternateIcao: request.alternateIcao ?? "",
       atcRoute: request.atcRoute,
       flightLevel: request.flightLevel,
-      departureTimeUtc: request.departureTimeUtc,
+      departureTimeUtc: normalizeDepartureTimeUtc(request.departureTimeUtc),
       flightNumber: request.flightNumber ?? "",
       aircraftRegistration: request.aircraftRegistration ?? "",
     }),
