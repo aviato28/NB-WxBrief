@@ -1,14 +1,13 @@
 import React from "react";
 import {
-  Circle,
   Document,
+  Image,
   Page,
   Path,
   StyleSheet,
   Svg,
   Text,
   View,
-  Polyline as SvgPolyline,
 } from "@react-pdf/renderer";
 import type { WeatherBriefing } from "@/domain/models/briefing";
 import type { Airport } from "@/domain/models/airport";
@@ -21,9 +20,11 @@ import type {
 import {
   APP_NAME,
   DATA_SOURCE_FOOTER,
-  PDF_PAGE_MARGIN_PT,
 } from "@/domain/constants/app";
-import { TURBULENCE_LABELS, CONVECTIVE_LABELS } from "@/domain/constants/weather-styles";
+import {
+  CONVECTIVE_LABELS,
+  TURBULENCE_LABELS,
+} from "@/domain/constants/weather-styles";
 import {
   formatCeiling,
   formatFlightLevel,
@@ -32,35 +33,27 @@ import {
   formatWind,
 } from "@/lib/format";
 
-/** Airline briefing palette — high contrast, scan-friendly. */
-const C = {
-  ink: "#0a1628",
-  inkSoft: "#1e293b",
-  paper: "#ffffff",
-  panel: "#f7f9fc",
-  panelAlt: "#eef2f7",
-  line: "#d8e0ea",
-  lineStrong: "#b8c4d4",
-  muted: "#64748b",
-  mutedLight: "#94a3b8",
-  navy: "#0b1f33",
-  navyMid: "#143049",
-  cyan: "#0e7490",
-  cyanSoft: "#ecfeff",
-  green: "#047857",
-  greenBg: "#ecfdf5",
-  blue: "#1d4ed8",
-  blueBg: "#eff6ff",
-  amber: "#b45309",
-  amberBg: "#fffbeb",
-  orange: "#c2410c",
-  orangeBg: "#fff7ed",
-  red: "#b91c1c",
-  redBg: "#fef2f2",
-  purple: "#7e22ce",
-  purpleBg: "#faf5ff",
-  white: "#ffffff",
-} as const;
+/** Restrained aviation print palette. */
+const ink = "#0b1524";
+const slate = "#334155";
+const mute = "#64748b";
+const line = "#e2e8f0";
+const soft = "#f1f5f9";
+const softAlt = "#e8eef5";
+const navy = "#0b1f33";
+const navyBand = "#132a42";
+const cyan = "#0e7490";
+const white = "#ffffff";
+const green = "#047857";
+const greenBg = "#ecfdf5";
+const blue = "#1d4ed8";
+const blueBg = "#eff6ff";
+const amber = "#b45309";
+const amberBg = "#fffbeb";
+const red = "#b91c1c";
+const redBg = "#fef2f2";
+const purple = "#7e22ce";
+const purpleBg = "#faf5ff";
 
 const TURB_RANK: Record<TurbulenceIntensity, number> = {
   NONE: 0,
@@ -68,14 +61,12 @@ const TURB_RANK: Record<TurbulenceIntensity, number> = {
   MODERATE: 2,
   SEVERE: 3,
 };
-
 const CONV_RANK: Record<ConvectiveRisk, number> = {
   NONE: 0,
   ISOLATED: 1,
   SCATTERED: 2,
   WIDESPREAD: 3,
 };
-
 const THREAT_RANK: Record<ThreatSeverity, number> = {
   INFO: 0,
   CAUTION: 1,
@@ -83,103 +74,66 @@ const THREAT_RANK: Record<ThreatSeverity, number> = {
   CRITICAL: 3,
 };
 
-function turbColors(intensity: TurbulenceIntensity): {
-  fg: string;
-  bg: string;
-  border: string;
-} {
-  switch (intensity) {
+function turbTone(v: TurbulenceIntensity): { fg: string; bg: string; bd: string } {
+  switch (v) {
     case "SEVERE":
-      return { fg: C.red, bg: C.redBg, border: "#fecaca" };
+      return { fg: red, bg: redBg, bd: "#fecaca" };
     case "MODERATE":
-      return { fg: C.amber, bg: C.amberBg, border: "#fde68a" };
+      return { fg: amber, bg: amberBg, bd: "#fde68a" };
     case "LIGHT":
-      return { fg: C.blue, bg: C.blueBg, border: "#bfdbfe" };
+      return { fg: blue, bg: blueBg, bd: "#bfdbfe" };
     default:
-      return { fg: C.green, bg: C.greenBg, border: "#a7f3d0" };
+      return { fg: green, bg: greenBg, bd: "#a7f3d0" };
   }
 }
 
-function categoryColors(category: string | undefined): {
-  fg: string;
-  bg: string;
-  border: string;
-} {
-  switch (category) {
+function catTone(v: string | undefined): { fg: string; bg: string; bd: string } {
+  switch (v) {
     case "VFR":
-      return { fg: C.green, bg: C.greenBg, border: "#a7f3d0" };
+      return { fg: green, bg: greenBg, bd: "#a7f3d0" };
     case "MVFR":
-      return { fg: C.blue, bg: C.blueBg, border: "#bfdbfe" };
+      return { fg: blue, bg: blueBg, bd: "#bfdbfe" };
     case "IFR":
-      return { fg: C.red, bg: C.redBg, border: "#fecaca" };
+      return { fg: red, bg: redBg, bd: "#fecaca" };
     case "LIFR":
-      return { fg: C.purple, bg: C.purpleBg, border: "#e9d5ff" };
+      return { fg: purple, bg: purpleBg, bd: "#e9d5ff" };
     default:
-      return { fg: C.muted, bg: C.panelAlt, border: C.line };
+      return { fg: mute, bg: soft, bd: line };
   }
 }
 
-function maxTurbulence(
-  items: readonly { readonly intensity: TurbulenceIntensity }[],
-): TurbulenceIntensity {
-  let max: TurbulenceIntensity = "NONE";
+function maxOf<T extends string>(
+  items: readonly T[],
+  rank: Record<T, number>,
+  fallback: T,
+): T {
+  let best = fallback;
   for (const item of items) {
-    if (TURB_RANK[item.intensity] > TURB_RANK[max]) {
-      max = item.intensity;
-    }
+    if (rank[item] > rank[best]) best = item;
   }
-  return max;
+  return best;
 }
 
-function maxConvective(
-  items: readonly { readonly risk: ConvectiveRisk }[],
-): ConvectiveRisk {
-  let max: ConvectiveRisk = "NONE";
-  for (const item of items) {
-    if (CONV_RANK[item.risk] > CONV_RANK[max]) {
-      max = item.risk;
-    }
-  }
-  return max;
-}
-
-function maxThreat(
-  items: readonly { readonly severity: ThreatSeverity }[],
-): ThreatSeverity | null {
-  if (items.length === 0) return null;
-  let max: ThreatSeverity = "INFO";
-  for (const item of items) {
-    if (THREAT_RANK[item.severity] > THREAT_RANK[max]) {
-      max = item.severity;
-    }
-  }
-  return max;
-}
-
-function riskLabel(
+function riskTone(
   turb: TurbulenceIntensity,
   conv: ConvectiveRisk,
   threat: ThreatSeverity | null,
-): { label: string; fg: string; bg: string; border: string } {
-  const threatRank = threat ? THREAT_RANK[threat] : 0;
-  const score = Math.max(TURB_RANK[turb], CONV_RANK[conv], threatRank);
-  if (score >= 3) {
-    return { label: "HIGH", fg: C.red, bg: C.redBg, border: "#fecaca" };
-  }
-  if (score >= 2) {
-    return { label: "ELEVATED", fg: C.amber, bg: C.amberBg, border: "#fde68a" };
-  }
-  if (score >= 1) {
-    return { label: "MODERATE", fg: C.blue, bg: C.blueBg, border: "#bfdbfe" };
-  }
-  return { label: "LOW", fg: C.green, bg: C.greenBg, border: "#a7f3d0" };
+): { label: string; fg: string; bg: string; bd: string } {
+  const score = Math.max(
+    TURB_RANK[turb],
+    CONV_RANK[conv],
+    threat ? THREAT_RANK[threat] : 0,
+  );
+  if (score >= 3) return { label: "HIGH", fg: red, bg: redBg, bd: "#fecaca" };
+  if (score >= 2)
+    return { label: "ELEVATED", fg: amber, bg: amberBg, bd: "#fde68a" };
+  if (score >= 1) return { label: "WATCH", fg: blue, bg: blueBg, bd: "#bfdbfe" };
+  return { label: "LOW", fg: green, bg: greenBg, bd: "#a7f3d0" };
 }
 
-function cloudLine(
-  clouds: AirportWeather["metar"],
-): string {
-  if (!clouds?.clouds.length) return "—";
-  return clouds.clouds
+function clouds(metar: AirportWeather["metar"]): string {
+  if (!metar?.clouds.length) return "—";
+  return metar.clouds
     .map((c) =>
       c.baseFtAgl === null
         ? c.cover
@@ -188,127 +142,147 @@ function cloudLine(
     .join(" ");
 }
 
-function shortPilotLine(text: string): string {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  return lines[lines.length - 1] ?? text;
+function shortLine(text: string): string {
+  const parts = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  return parts[parts.length - 1] ?? text;
 }
 
-const styles = StyleSheet.create({
+function clip(text: string, n: number): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length <= n ? t : `${t.slice(0, n - 1)}…`;
+}
+
+const s = StyleSheet.create({
   page: {
-    paddingTop: PDF_PAGE_MARGIN_PT,
-    paddingBottom: PDF_PAGE_MARGIN_PT + 22,
-    paddingHorizontal: PDF_PAGE_MARGIN_PT,
-    fontSize: 9,
+    paddingTop: 0,
+    paddingBottom: 34,
+    paddingHorizontal: 0,
+    fontSize: 8.5,
     fontFamily: "Helvetica",
-    color: C.ink,
-    backgroundColor: C.paper,
+    color: ink,
+    backgroundColor: white,
   },
-  header: {
-    backgroundColor: C.navy,
-    paddingTop: 10,
-    paddingBottom: 8,
-    paddingHorizontal: 12,
+  content: {
+    paddingHorizontal: 26,
+  },
+  masthead: {
+    backgroundColor: navy,
+    paddingTop: 12,
+    paddingBottom: 10,
+    paddingHorizontal: 26,
     marginBottom: 10,
   },
-  brandRow: {
+  mastTop: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
+    alignItems: "flex-start",
+    marginBottom: 8,
   },
   brand: {
     fontSize: 10,
     fontFamily: "Helvetica-Bold",
+    color: white,
     letterSpacing: 1.6,
-    color: C.white,
   },
-  brandTag: {
-    fontSize: 7,
+  brandSub: {
+    fontSize: 6.5,
     color: "#94a3b8",
-    letterSpacing: 0.8,
+    marginTop: 2,
+    letterSpacing: 0.7,
     textTransform: "uppercase",
   },
-  headerMeta: {
+  mastStamp: {
+    fontSize: 7,
+    color: "#cbd5e1",
+    textAlign: "right",
+  },
+  mastGrid: {
     flexDirection: "row",
-    flexWrap: "wrap",
+    backgroundColor: navyBand,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
   },
-  metaCell: {
-    width: "25%",
-    marginBottom: 5,
-    paddingRight: 6,
+  mastCell: {
+    width: "16.66%",
+    paddingRight: 4,
   },
-  metaLabel: {
-    fontSize: 6.5,
+  mastLabel: {
+    fontSize: 5.5,
     color: "#7c8aa0",
-    letterSpacing: 0.7,
+    letterSpacing: 0.6,
     textTransform: "uppercase",
     marginBottom: 1,
   },
-  metaValue: {
-    fontSize: 9.5,
+  mastValue: {
+    fontSize: 9,
     fontFamily: "Helvetica-Bold",
-    color: C.white,
+    color: white,
   },
-  routeStrip: {
+  routeBand: {
     marginTop: 6,
-    paddingTop: 6,
+    paddingTop: 5,
     borderTopWidth: 1,
     borderTopColor: "#1e3a5f",
   },
   routeText: {
-    fontSize: 7,
-    color: "#cbd5e1",
-    lineHeight: 1.35,
+    fontSize: 6.5,
+    color: "#94a3b8",
+    lineHeight: 1.3,
   },
   section: {
+    marginTop: 2,
+    marginBottom: 6,
+  },
+  sectionHead: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  sectionBar: {
-    width: 3,
-    height: 11,
-    backgroundColor: C.cyan,
-    marginRight: 7,
+    backgroundColor: soft,
+    borderLeftWidth: 3,
+    borderLeftColor: navy,
+    paddingVertical: 4,
+    paddingHorizontal: 7,
+    marginBottom: 6,
   },
   sectionTitle: {
-    fontSize: 9,
+    fontSize: 7.5,
     fontFamily: "Helvetica-Bold",
-    letterSpacing: 1.1,
-    color: C.navy,
+    color: navy,
+    letterSpacing: 1,
     textTransform: "uppercase",
+  },
+  sectionHint: {
+    marginLeft: "auto",
+    fontSize: 6,
+    color: mute,
   },
   execRow: {
     flexDirection: "row",
-    marginBottom: 4,
+    marginBottom: 8,
   },
   execCard: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: C.line,
-    backgroundColor: C.panel,
-    paddingVertical: 8,
-    paddingHorizontal: 7,
-    minHeight: 58,
     marginRight: 5,
+    borderWidth: 1,
+    borderColor: line,
+    backgroundColor: white,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
   },
   execCardLast: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: C.line,
-    backgroundColor: C.panel,
-    paddingVertical: 8,
-    paddingHorizontal: 7,
-    minHeight: 58,
     marginRight: 0,
+    borderWidth: 1,
+    borderColor: line,
+    backgroundColor: white,
+    paddingVertical: 7,
+    paddingHorizontal: 6,
   },
   execLabel: {
-    fontSize: 6.5,
-    letterSpacing: 0.7,
+    fontSize: 6,
+    color: mute,
+    letterSpacing: 0.5,
     textTransform: "uppercase",
-    color: C.muted,
-    marginBottom: 4,
+    marginBottom: 3,
   },
   execValue: {
     fontSize: 10,
@@ -316,376 +290,362 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   execHint: {
-    fontSize: 7,
-    color: C.muted,
-    lineHeight: 1.25,
+    fontSize: 6.5,
+    color: mute,
   },
   badge: {
-    fontSize: 7.5,
+    fontSize: 6.5,
     fontFamily: "Helvetica-Bold",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: 4,
+    paddingVertical: 1.5,
     borderWidth: 1,
     alignSelf: "flex-start",
   },
-  summaryGrid: {
+  summaryRow: {
     flexDirection: "row",
     borderWidth: 1,
-    borderColor: C.line,
-    backgroundColor: C.panel,
-    marginBottom: 2,
+    borderColor: line,
+    marginBottom: 8,
   },
   summaryCell: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 7,
     borderRightWidth: 1,
-    borderRightColor: C.line,
+    borderRightColor: line,
+    backgroundColor: soft,
   },
   summaryCellLast: {
     flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 7,
+    backgroundColor: soft,
   },
-  summaryLabel: {
-    fontSize: 6.5,
-    color: C.muted,
-    letterSpacing: 0.6,
+  kicker: {
+    fontSize: 6,
+    color: mute,
+    letterSpacing: 0.5,
     textTransform: "uppercase",
-    marginBottom: 2,
+    marginBottom: 1,
   },
-  summaryValue: {
+  strong: {
     fontSize: 9,
     fontFamily: "Helvetica-Bold",
-    color: C.ink,
+    color: ink,
   },
-  summarySub: {
-    fontSize: 7,
-    color: C.muted,
-    marginTop: 2,
+  faint: {
+    fontSize: 6.5,
+    color: mute,
+    marginTop: 1,
+  },
+  mapShell: {
+    borderWidth: 1,
+    borderColor: "#64748b",
+    marginBottom: 4,
+    backgroundColor: "#0b0e13",
+  },
+  mapImage: {
+    width: "100%",
+    height: 368,
+    objectFit: "cover",
+  },
+  mapFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: soft,
+    borderTopWidth: 1,
+    borderTopColor: line,
+    paddingVertical: 4,
+    paddingHorizontal: 7,
+  },
+  mapFooterText: {
+    fontSize: 6,
+    color: mute,
+  },
+  mapMissing: {
+    height: 120,
+    backgroundColor: soft,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: line,
+    marginBottom: 6,
   },
   airportCard: {
     borderWidth: 1,
-    borderColor: C.line,
-    marginBottom: 8,
+    borderColor: line,
+    marginBottom: 7,
   },
   airportHead: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    backgroundColor: C.navy,
-    paddingVertical: 7,
-    paddingHorizontal: 10,
+    backgroundColor: navy,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
   },
   airportRole: {
-    fontSize: 7,
+    fontSize: 6,
     color: "#94a3b8",
-    letterSpacing: 0.8,
+    letterSpacing: 0.7,
     textTransform: "uppercase",
   },
   airportIcao: {
-    fontSize: 12,
+    fontSize: 11,
     fontFamily: "Helvetica-Bold",
-    color: C.white,
+    color: white,
+    marginTop: 1,
   },
   airportName: {
-    fontSize: 7.5,
+    fontSize: 7,
     color: "#cbd5e1",
     marginTop: 1,
   },
-  opsGrid: {
-    flexDirection: "row",
-    backgroundColor: C.panel,
+  callout: {
+    backgroundColor: "#ecfeff",
     borderBottomWidth: 1,
-    borderBottomColor: C.line,
+    borderBottomColor: line,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+  },
+  calloutText: {
+    fontSize: 7.5,
+    color: slate,
+    lineHeight: 1.3,
+  },
+  opsRow: {
+    flexDirection: "row",
+    borderBottomWidth: 1,
+    borderBottomColor: line,
   },
   opsCell: {
     width: "20%",
-    paddingVertical: 7,
-    paddingHorizontal: 7,
+    paddingVertical: 5,
+    paddingHorizontal: 6,
     borderRightWidth: 1,
-    borderRightColor: C.line,
+    borderRightColor: line,
+    backgroundColor: soft,
   },
   opsLabel: {
-    fontSize: 6,
-    color: C.muted,
-    letterSpacing: 0.5,
+    fontSize: 5.5,
+    color: mute,
+    letterSpacing: 0.4,
     textTransform: "uppercase",
-    marginBottom: 2,
+    marginBottom: 1,
   },
   opsValue: {
-    fontSize: 7.5,
+    fontSize: 7,
     fontFamily: "Helvetica-Bold",
-    color: C.ink,
+    color: ink,
   },
   airportBody: {
-    padding: 9,
-  },
-  callout: {
-    backgroundColor: C.cyanSoft,
-    borderLeftWidth: 2,
-    borderLeftColor: C.cyan,
-    paddingVertical: 5,
-    paddingHorizontal: 7,
-    marginBottom: 7,
-  },
-  calloutText: {
-    fontSize: 8,
-    color: C.inkSoft,
-    lineHeight: 1.3,
-  },
-  rawBlock: {
-    backgroundColor: C.panelAlt,
-    paddingVertical: 5,
-    paddingHorizontal: 7,
-    marginTop: 5,
-  },
-  rawLabel: {
-    fontSize: 6,
-    color: C.mutedLight,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-    marginBottom: 2,
-  },
-  mono: {
-    fontFamily: "Courier",
-    fontSize: 6.8,
-    color: C.inkSoft,
-    lineHeight: 1.3,
+    padding: 6,
   },
   tafRow: {
     flexDirection: "row",
-    marginBottom: 2,
+    marginBottom: 1,
   },
   tafType: {
-    width: 48,
-    fontSize: 7,
+    width: 42,
+    fontSize: 6.5,
     fontFamily: "Helvetica-Bold",
   },
   tafText: {
     flex: 1,
-    fontSize: 7,
-    color: C.inkSoft,
+    fontSize: 6.5,
+    color: slate,
   },
-  mapFrame: {
-    borderWidth: 1,
-    borderColor: C.lineStrong,
-    backgroundColor: "#f1f5f9",
-    marginBottom: 6,
+  rawBox: {
+    backgroundColor: softAlt,
+    paddingVertical: 3,
+    paddingHorizontal: 5,
+    marginTop: 3,
   },
-  mapCaption: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    paddingVertical: 5,
-    paddingHorizontal: 8,
-    borderTopWidth: 1,
-    borderTopColor: C.line,
-    backgroundColor: C.panel,
+  rawLabel: {
+    fontSize: 5,
+    color: mute,
+    letterSpacing: 0.4,
+    textTransform: "uppercase",
+    marginBottom: 1,
   },
-  mapCaptionText: {
-    fontSize: 7,
-    color: C.muted,
+  mono: {
+    fontFamily: "Courier",
+    fontSize: 6,
+    color: slate,
+    lineHeight: 1.25,
   },
   table: {
     borderWidth: 1,
-    borderColor: C.line,
+    borderColor: line,
     marginBottom: 6,
   },
-  tableHead: {
+  thead: {
     flexDirection: "row",
-    backgroundColor: C.navy,
-    paddingVertical: 5,
-    paddingHorizontal: 6,
+    backgroundColor: navy,
+    paddingVertical: 4,
+    paddingHorizontal: 5,
   },
   th: {
-    fontSize: 6.5,
+    fontSize: 5.5,
     fontFamily: "Helvetica-Bold",
     color: "#cbd5e1",
-    letterSpacing: 0.5,
+    letterSpacing: 0.4,
     textTransform: "uppercase",
   },
   tr: {
     flexDirection: "row",
-    paddingVertical: 5,
-    paddingHorizontal: 6,
+    paddingVertical: 4,
+    paddingHorizontal: 5,
     borderBottomWidth: 1,
-    borderBottomColor: C.line,
+    borderBottomColor: line,
     alignItems: "center",
   },
   td: {
-    fontSize: 7.5,
-    color: C.ink,
-  },
-  tdMuted: {
     fontSize: 7,
-    color: C.muted,
+    color: ink,
   },
-  noteChip: {
+  tdMute: {
+    fontSize: 6.5,
+    color: mute,
+  },
+  note: {
+    backgroundColor: soft,
     borderWidth: 1,
-    borderColor: C.line,
-    backgroundColor: C.panel,
-    paddingVertical: 5,
-    paddingHorizontal: 7,
-    marginBottom: 4,
+    borderColor: line,
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    marginBottom: 3,
   },
   noteText: {
-    fontSize: 8,
-    color: C.inkSoft,
-    lineHeight: 1.3,
+    fontSize: 7.5,
+    color: slate,
+    lineHeight: 1.25,
   },
   turbCard: {
     borderWidth: 1,
-    borderColor: C.line,
-    marginBottom: 5,
-    paddingVertical: 7,
-    paddingHorizontal: 8,
+    borderColor: line,
+    paddingVertical: 5,
+    paddingHorizontal: 7,
+    marginBottom: 4,
   },
   turbTop: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 4,
+    marginBottom: 2,
   },
   turbSeg: {
-    fontSize: 9,
+    fontSize: 8.5,
     fontFamily: "Helvetica-Bold",
-    color: C.ink,
   },
-  turbMeta: {
+  metaRow: {
     flexDirection: "row",
-    marginTop: 3,
+    marginTop: 2,
   },
-  turbMetaItem: {
-    fontSize: 7,
-    color: C.muted,
+  metaItem: {
+    fontSize: 6.5,
+    color: mute,
     marginRight: 10,
   },
-  turbMetaStrong: {
+  metaStrong: {
     fontFamily: "Helvetica-Bold",
-    color: C.inkSoft,
+    color: slate,
   },
-  bulletRow: {
+  bullet: {
     flexDirection: "row",
-    marginBottom: 4,
+    backgroundColor: soft,
+    borderLeftWidth: 2,
+    borderLeftColor: cyan,
     paddingVertical: 5,
     paddingHorizontal: 7,
-    backgroundColor: C.panel,
-    borderLeftWidth: 2,
-    borderLeftColor: C.cyan,
+    marginBottom: 3,
   },
   bulletMark: {
-    width: 10,
-    fontSize: 9,
-    color: C.cyan,
+    width: 9,
+    color: cyan,
     fontFamily: "Helvetica-Bold",
   },
   bulletText: {
     flex: 1,
-    fontSize: 8.5,
-    color: C.ink,
-    lineHeight: 1.3,
+    fontSize: 8,
+    color: ink,
+    lineHeight: 1.25,
   },
   footer: {
     position: "absolute",
-    left: PDF_PAGE_MARGIN_PT,
-    right: PDF_PAGE_MARGIN_PT,
-    bottom: 10,
-    fontSize: 6.5,
-    color: C.muted,
+    left: 26,
+    right: 26,
+    bottom: 8,
     borderTopWidth: 1,
-    borderTopColor: C.line,
-    paddingTop: 4,
+    borderTopColor: line,
+    paddingTop: 3,
     flexDirection: "row",
     justifyContent: "space-between",
+    fontSize: 6,
+    color: mute,
   },
   legendRow: {
     flexDirection: "row",
-    marginBottom: 6,
-    flexWrap: "wrap",
+    marginBottom: 4,
   },
   legendItem: {
     flexDirection: "row",
     alignItems: "center",
-    marginRight: 10,
+    marginRight: 9,
   },
-  legendSwatch: {
-    width: 8,
-    height: 8,
+  legendDot: {
+    width: 6,
+    height: 6,
     marginRight: 3,
     borderWidth: 1,
   },
   legendText: {
-    fontSize: 6.5,
-    color: C.muted,
+    fontSize: 6,
+    color: mute,
   },
 });
 
-function SectionHeading({ title }: { readonly title: string }) {
+function Section({
+  title,
+  hint,
+}: {
+  readonly title: string;
+  readonly hint?: string;
+}) {
   return (
-    <View style={styles.section} wrap={false}>
-      <View style={styles.sectionBar} />
-      <Text style={styles.sectionTitle}>{title}</Text>
+    <View style={s.sectionHead} wrap={false}>
+      <Text style={s.sectionTitle}>{title}</Text>
+      {hint ? <Text style={s.sectionHint}>{hint}</Text> : null}
     </View>
   );
 }
 
-function RideBadge({ intensity }: { readonly intensity: TurbulenceIntensity }) {
-  const colors = turbColors(intensity);
+function Badge({
+  label,
+  fg,
+  bg,
+  bd,
+}: {
+  readonly label: string;
+  readonly fg: string;
+  readonly bg: string;
+  readonly bd: string;
+}) {
   return (
-    <Text
-      style={[
-        styles.badge,
-        {
-          color: colors.fg,
-          backgroundColor: colors.bg,
-          borderColor: colors.border,
-        },
-      ]}
-    >
-      {TURBULENCE_LABELS[intensity].toUpperCase()}
+    <Text style={[s.badge, { color: fg, backgroundColor: bg, borderColor: bd }]}>
+      {label}
     </Text>
   );
 }
 
-function IconPlane() {
+function IconMark() {
   return (
-    <Svg width={12} height={12} viewBox="0 0 24 24">
+    <Svg width={14} height={14} viewBox="0 0 24 24">
       <Path
         d="M21 16v-2l-8-5V3.5a1.5 1.5 0 0 0-3 0V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"
         fill="#94a3b8"
       />
     </Svg>
-  );
-}
-
-function ExecCard({
-  label,
-  value,
-  hint,
-  fg,
-  bg,
-  border,
-  last = false,
-}: {
-  readonly label: string;
-  readonly value: string;
-  readonly hint: string;
-  readonly fg: string;
-  readonly bg: string;
-  readonly border: string;
-  readonly last?: boolean;
-}) {
-  return (
-    <View
-      style={[
-        last ? styles.execCardLast : styles.execCard,
-        { backgroundColor: bg, borderColor: border },
-      ]}
-    >
-      <Text style={styles.execLabel}>{label}</Text>
-      <Text style={[styles.execValue, { color: fg }]}>{value}</Text>
-      <Text style={styles.execHint}>{hint}</Text>
-    </View>
   );
 }
 
@@ -699,316 +659,90 @@ function AirportCard({
   readonly weather: AirportWeather;
 }) {
   const cat = weather.metar?.flightCategory ?? "UNKNOWN";
-  const catStyle = categoryColors(cat);
+  const tone = catTone(cat);
 
   return (
-    <View style={styles.airportCard} wrap={false}>
-      <View style={styles.airportHead}>
+    <View style={s.airportCard}>
+      <View style={s.airportHead} wrap={false}>
         <View>
-          <Text style={styles.airportRole}>{role}</Text>
-          <Text style={styles.airportIcao}>{airport.icao}</Text>
-          <Text style={styles.airportName}>{airport.name}</Text>
+          <Text style={s.airportRole}>{role}</Text>
+          <Text style={s.airportIcao}>{airport.icao}</Text>
+          <Text style={s.airportName}>{airport.name}</Text>
         </View>
-        <View
-          style={{
-            backgroundColor: catStyle.bg,
-            borderWidth: 1,
-            borderColor: catStyle.border,
-            paddingVertical: 4,
-            paddingHorizontal: 8,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 10,
-              fontFamily: "Helvetica-Bold",
-              color: catStyle.fg,
-            }}
-          >
-            {cat}
-          </Text>
-        </View>
+        <Badge label={cat} fg={tone.fg} bg={tone.bg} bd={tone.bd} />
       </View>
 
-      <View style={styles.callout}>
-        <Text style={styles.calloutText}>{weather.operationalSummary}</Text>
-      </View>
-
-      <View style={styles.opsGrid}>
-        <View style={styles.opsCell}>
-          <Text style={styles.opsLabel}>Wind</Text>
-          <Text style={styles.opsValue}>
-            {weather.metar ? formatWind(weather.metar.wind) : "—"}
-          </Text>
-        </View>
-        <View style={styles.opsCell}>
-          <Text style={styles.opsLabel}>Visibility</Text>
-          <Text style={styles.opsValue}>
-            {formatVisibilitySm(weather.metar?.visibilitySm ?? null)}
-          </Text>
-        </View>
-        <View style={styles.opsCell}>
-          <Text style={styles.opsLabel}>Clouds</Text>
-          <Text style={styles.opsValue}>{cloudLine(weather.metar)}</Text>
-        </View>
-        <View style={styles.opsCell}>
-          <Text style={styles.opsLabel}>Ceiling</Text>
-          <Text style={styles.opsValue}>
-            {formatCeiling(weather.metar?.ceilingFtAgl ?? null)}
-          </Text>
-        </View>
-        <View style={[styles.opsCell, { borderRightWidth: 0, width: "20%" }]}>
-          <Text style={styles.opsLabel}>Temp / QNH</Text>
-          <Text style={styles.opsValue}>
-            {weather.metar?.temperatureC ?? "—"}°C ·{" "}
-            {weather.metar?.qnhHpa ?? "—"} hPa
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.airportBody}>
-        {weather.taf?.periods.slice(0, 4).map((period) => {
-          const pStyle = categoryColors(period.flightCategory);
-          return (
-            <View key={`${period.type}-${period.from}`} style={styles.tafRow}>
-              <Text style={[styles.tafType, { color: pStyle.fg }]}>
-                {period.type}
-              </Text>
-              <Text style={styles.tafText}>
-                {period.flightCategory} · {period.rawFragment}
-              </Text>
-            </View>
-          );
-        })}
-
-        <View style={styles.rawBlock}>
-          <Text style={styles.rawLabel}>Raw METAR</Text>
-          <Text style={styles.mono}>
-            {weather.metar?.raw ?? "METAR unavailable"}
-          </Text>
-        </View>
-        <View style={styles.rawBlock}>
-          <Text style={styles.rawLabel}>Raw TAF</Text>
-          <Text style={styles.mono}>
-            {weather.taf?.raw ?? "TAF unavailable"}
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function truncateRaw(text: string, maxChars: number): string {
-  const compact = text.replace(/\s+/g, " ").trim();
-  if (compact.length <= maxChars) return compact;
-  return `${compact.slice(0, maxChars - 1)}…`;
-}
-
-function RouteChart({ briefing }: { readonly briefing: WeatherBriefing }) {
-  const points = briefing.route.pathPoints;
-  if (points.length < 2) {
-    return (
-      <Text style={{ fontSize: 8, color: C.muted }}>
-        Route geometry unavailable.
-      </Text>
-    );
-  }
-
-  const lats = points.map((p) => p.latitude);
-  const lons = points.map((p) => p.longitude);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLon = Math.min(...lons);
-  const maxLon = Math.max(...lons);
-
-  // Primary visual — full content width, tall plot.
-  const width = 539;
-  const height = 360;
-  const pad = 22;
-
-  const project = (lat: number, lon: number): [number, number] => {
-    const x =
-      pad +
-      ((lon - minLon) / Math.max(0.0001, maxLon - minLon)) * (width - pad * 2);
-    const y =
-      pad +
-      (1 - (lat - minLat) / Math.max(0.0001, maxLat - minLat)) *
-        (height - pad * 2);
-    return [x, y];
-  };
-
-  const poly = points
-    .map((p) => project(p.latitude, p.longitude).join(","))
-    .join(" ");
-
-  const turbByFix = new Map<string, TurbulenceIntensity>();
-  for (const turb of briefing.enroute.turbulence) {
-    turbByFix.set(turb.fromFix, turb.intensity);
-  }
-
-  const dep = briefing.route.fixes[0];
-  const dest = briefing.route.fixes[briefing.route.fixes.length - 1];
-
-  return (
-    <View style={styles.mapFrame} wrap={false}>
-      <Svg width={width} height={height}>
-        <SvgPolyline
-          points={`${pad},${pad} ${width - pad},${pad} ${width - pad},${height - pad} ${pad},${height - pad} ${pad},${pad}`}
-          stroke="#e2e8f0"
-          strokeWidth={0.75}
-          fill="#f8fafc"
-        />
-
-        {[0.25, 0.5, 0.75].map((f) => (
-          <SvgPolyline
-            key={`h-${f}`}
-            points={`${pad},${pad + f * (height - pad * 2)} ${width - pad},${pad + f * (height - pad * 2)}`}
-            stroke="#e2e8f0"
-            strokeWidth={0.5}
-            fill="none"
-          />
-        ))}
-        {[0.25, 0.5, 0.75].map((f) => (
-          <SvgPolyline
-            key={`v-${f}`}
-            points={`${pad + f * (width - pad * 2)},${pad} ${pad + f * (width - pad * 2)},${height - pad}`}
-            stroke="#e2e8f0"
-            strokeWidth={0.5}
-            fill="none"
-          />
-        ))}
-
-        <SvgPolyline
-          points={poly}
-          stroke={C.cyan}
-          strokeWidth={3}
-          fill="none"
-        />
-
-        {briefing.route.fixes.map((fix, index) => {
-          if (!fix.coordinates) return null;
-          const [x, y] = project(
-            fix.coordinates.latitude,
-            fix.coordinates.longitude,
-          );
-          const intensity = turbByFix.get(fix.name) ?? "NONE";
-          const color = turbColors(intensity).fg;
-          const isEnd =
-            index === 0 || index === briefing.route.fixes.length - 1;
-          return (
-            <Circle
-              key={fix.id}
-              cx={x}
-              cy={y}
-              r={isEnd ? 5 : 3.2}
-              fill={isEnd ? C.navy : color}
-            />
-          );
-        })}
-      </Svg>
-      <View style={styles.mapCaption}>
-        <Text style={styles.mapCaptionText}>
-          {dep?.name ?? "DEP"} - {dest?.name ?? "DEST"} ·{" "}
-          {Math.round(briefing.route.totalDistanceNm)} NM ·{" "}
-          {briefing.route.fixes.length} waypoints
-        </Text>
-        <Text style={styles.mapCaptionText}>
-          Filed route plot · waypoint markers by ride quality
+      <View style={s.callout} wrap={false}>
+        <Text style={s.calloutText}>
+          {clip(weather.operationalSummary, 160)}
         </Text>
       </View>
-    </View>
-  );
-}
 
-function WaypointTable({ briefing }: { readonly briefing: WeatherBriefing }) {
-  const byFix = new Map(
-    briefing.enroute.waypointConditions.map((c) => [c.fixName, c]),
-  );
-  const turbByFrom = new Map(
-    briefing.enroute.turbulence.map((t) => [t.fromFix, t]),
-  );
-
-  return (
-    <View style={styles.table}>
-      <View style={styles.tableHead} wrap={false}>
-        <Text style={[styles.th, { width: "14%" }]}>Waypoint</Text>
-        <Text style={[styles.th, { width: "12%" }]}>Ride</Text>
-        <Text style={[styles.th, { width: "16%" }]}>Wind</Text>
-        <Text style={[styles.th, { width: "10%" }]}>Temp</Text>
-        <Text style={[styles.th, { width: "10%" }]}>Cloud</Text>
-        <Text style={[styles.th, { width: "38%" }]}>Operational remark</Text>
-      </View>
-      {briefing.route.fixes.map((fix, index) => {
-        const condition = byFix.get(fix.name);
-        const turb = turbByFrom.get(fix.name);
-        const intensity =
-          condition?.turbulence ?? turb?.intensity ?? ("NONE" as const);
-        const wind =
-          condition?.windDirectionDeg !== null &&
-          condition?.windDirectionDeg !== undefined &&
-          condition.windSpeedKt !== null
-            ? `${String(condition.windDirectionDeg).padStart(3, "0")}/${condition.windSpeedKt}kt`
-            : "—";
-        const remark =
-          turb?.pilotText
-            ? shortPilotLine(turb.pilotText)
-            : (condition?.forecastNote ?? "—");
-        const alt = index % 2 === 1;
-
-        return (
+      <View style={s.opsRow} wrap={false}>
+        {(
+          [
+            ["Wind", weather.metar ? formatWind(weather.metar.wind) : "—"],
+            ["Visibility", formatVisibilitySm(weather.metar?.visibilitySm ?? null)],
+            ["Clouds", clouds(weather.metar)],
+            ["Ceiling", formatCeiling(weather.metar?.ceilingFtAgl ?? null)],
+            [
+              "Temp / QNH",
+              `${weather.metar?.temperatureC ?? "—"}°C · ${weather.metar?.qnhHpa ?? "—"} hPa`,
+            ],
+          ] as const
+        ).map(([label, value], index) => (
           <View
-            key={fix.id}
-            style={[
-              styles.tr,
-              { backgroundColor: alt ? C.panelAlt : C.white },
-            ]}
-            wrap={false}
+            key={label}
+            style={
+              index === 4
+                ? [s.opsCell, { borderRightWidth: 0 }]
+                : s.opsCell
+            }
           >
-            <Text
-              style={[
-                styles.td,
-                { width: "14%", fontFamily: "Helvetica-Bold" },
-              ]}
-            >
-              {fix.name}
-            </Text>
-            <View style={{ width: "12%" }}>
-              <RideBadge intensity={intensity} />
-            </View>
-            <Text style={[styles.td, { width: "16%", fontFamily: "Courier" }]}>
-              {wind}
-            </Text>
-            <Text style={[styles.td, { width: "10%" }]}>
-              {condition?.temperatureC !== null &&
-              condition?.temperatureC !== undefined
-                ? `${condition.temperatureC}°C`
-                : "—"}
-            </Text>
-            <Text style={[styles.td, { width: "10%" }]}>
-              {condition?.cloudCoverPct !== null &&
-              condition?.cloudCoverPct !== undefined
-                ? `${condition.cloudCoverPct}%`
-                : "—"}
-            </Text>
-            <Text style={[styles.tdMuted, { width: "38%" }]}>{remark}</Text>
+            <Text style={s.opsLabel}>{label}</Text>
+            <Text style={s.opsValue}>{value}</Text>
           </View>
-        );
-      })}
+        ))}
+      </View>
+
+      <View style={s.airportBody}>
+        {weather.taf?.periods.slice(0, 2).map((period) => {
+          const toneP = catTone(period.flightCategory);
+          return (
+            <View key={`${period.type}-${period.from}`} style={s.tafRow}>
+              <Text style={[s.tafType, { color: toneP.fg }]}>{period.type}</Text>
+              <Text style={s.tafText}>
+                {period.flightCategory} · {clip(period.rawFragment, 90)}
+              </Text>
+            </View>
+          );
+        })}
+        <View style={s.rawBox}>
+          <Text style={s.rawLabel}>Raw METAR</Text>
+          <Text style={s.mono}>
+            {clip(weather.metar?.raw ?? "METAR unavailable", 220)}
+          </Text>
+        </View>
+        <View style={s.rawBox}>
+          <Text style={s.rawLabel}>Raw TAF</Text>
+          <Text style={s.mono}>
+            {clip(weather.taf?.raw ?? "TAF unavailable", 220)}
+          </Text>
+        </View>
+      </View>
     </View>
   );
 }
 
 function Footer({ generatedAt }: { readonly generatedAt: string }) {
   return (
-    <View style={styles.footer} fixed>
+    <View style={s.footer} fixed>
       <Text>
-        {APP_NAME} · Generated{" "}
-        {formatUtc(generatedAt, "yyyy-MM-dd HH:mm")}Z UTC · {DATA_SOURCE_FOOTER}
+        {APP_NAME} · {formatUtc(generatedAt, "yyyy-MM-dd HH:mm")}Z UTC ·{" "}
+        {DATA_SOURCE_FOOTER}
       </Text>
       <Text
-        render={({ pageNumber, totalPages }) =>
-          `${pageNumber} / ${totalPages}`
-        }
+        render={({ pageNumber, totalPages }) => `${pageNumber} / ${totalPages}`}
       />
     </View>
   );
@@ -1016,482 +750,578 @@ function Footer({ generatedAt }: { readonly generatedAt: string }) {
 
 export function BriefingPdfDocument({
   briefing,
+  mapImageDataUrl,
 }: {
   readonly briefing: WeatherBriefing;
+  readonly mapImageDataUrl?: string | null;
 }) {
   const { summary, request, enroute } = briefing;
 
-  const maxTurb = maxTurbulence(enroute.turbulence);
-  const maxConv = maxConvective(enroute.convective);
-  const threat = maxThreat(briefing.threats);
-  const risk = riskLabel(maxTurb, maxConv, threat);
+  const maxTurb = maxOf(
+    enroute.turbulence.map((t) => t.intensity),
+    TURB_RANK,
+    "NONE",
+  );
+  const maxConv = maxOf(
+    enroute.convective.map((c) => c.risk),
+    CONV_RANK,
+    "NONE",
+  );
+  const topThreat =
+    briefing.threats.length === 0
+      ? null
+      : maxOf(
+          briefing.threats.map((t) => t.severity),
+          THREAT_RANK,
+          "INFO",
+        );
+  const risk = riskTone(maxTurb, maxConv, topThreat);
   const destCat =
     briefing.destinationWeather.metar?.flightCategory ?? "UNKNOWN";
-  const destColors = categoryColors(destCat);
-  const rideColors = turbColors(maxTurb);
-  const convColors =
+  const ride = turbTone(maxTurb);
+  const dest = catTone(destCat);
+  const conv =
     maxConv === "NONE"
-      ? { fg: C.green, bg: C.greenBg, border: "#a7f3d0" }
+      ? { fg: green, bg: greenBg, bd: "#a7f3d0" }
       : maxConv === "ISOLATED"
-        ? { fg: C.blue, bg: C.blueBg, border: "#bfdbfe" }
+        ? { fg: blue, bg: blueBg, bd: "#bfdbfe" }
         : maxConv === "SCATTERED"
-          ? { fg: C.amber, bg: C.amberBg, border: "#fde68a" }
-          : { fg: C.orange, bg: C.orangeBg, border: "#fed7aa" };
+          ? { fg: amber, bg: amberBg, bd: "#fde68a" }
+          : { fg: red, bg: redBg, bd: "#fecaca" };
 
-  const expectedRideHint =
-    enroute.turbulence.find((t) => t.intensity === maxTurb)?.segmentLabel ??
-    "Route assessment";
+  const byFix = new Map(
+    enroute.waypointConditions.map((c) => [c.fixName, c] as const),
+  );
+  const turbFrom = new Map(
+    enroute.turbulence.map((t) => [t.fromFix, t] as const),
+  );
 
   return (
     <Document
       title={`${APP_NAME} ${summary.departure.icao}-${summary.destination.icao}`}
       author={APP_NAME}
     >
-      {/* ── Page 1: Header, executive cards, flight summary, map ── */}
-      <Page size="A4" style={styles.page}>
-        <View style={styles.header}>
-          <View style={styles.brandRow}>
+      {/* PAGE 1 — masthead, executive cards, live map */}
+      <Page size="A4" style={s.page}>
+        <View style={s.masthead}>
+          <View style={s.mastTop}>
             <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <View style={{ marginRight: 6 }}>
-                <IconPlane />
+              <View style={{ marginRight: 7 }}>
+                <IconMark />
               </View>
-              <Text style={styles.brand}>{APP_NAME}</Text>
+              <View>
+                <Text style={s.brand}>{APP_NAME}</Text>
+                <Text style={s.brandSub}>Operational weather briefing</Text>
+              </View>
             </View>
-            <Text style={styles.brandTag}>Operational weather brief</Text>
+            <Text style={s.mastStamp}>
+              {formatUtc(summary.generatedAt, "yyyy-MM-dd HH:mm")}Z
+            </Text>
           </View>
-          <View style={styles.headerMeta}>
-            <View style={styles.metaCell}>
-              <Text style={styles.metaLabel}>Flight</Text>
-              <Text style={styles.metaValue}>
-                {request.flightNumber ?? "—"}
-              </Text>
-            </View>
-            <View style={styles.metaCell}>
-              <Text style={styles.metaLabel}>Aircraft</Text>
-              <Text style={styles.metaValue}>
-                {request.aircraftRegistration ?? "—"}
-              </Text>
-            </View>
-            <View style={styles.metaCell}>
-              <Text style={styles.metaLabel}>Flight level</Text>
-              <Text style={styles.metaValue}>
-                {formatFlightLevel(summary.flightLevel)}
-              </Text>
-            </View>
-            <View style={styles.metaCell}>
-              <Text style={styles.metaLabel}>Generated UTC</Text>
-              <Text style={styles.metaValue}>
-                {formatUtc(summary.generatedAt, "yyyy-MM-dd HH:mm")}Z
-              </Text>
-            </View>
-            <View style={styles.metaCell}>
-              <Text style={styles.metaLabel}>Departure</Text>
-              <Text style={styles.metaValue}>{summary.departure.icao}</Text>
-            </View>
-            <View style={styles.metaCell}>
-              <Text style={styles.metaLabel}>Destination</Text>
-              <Text style={styles.metaValue}>{summary.destination.icao}</Text>
-            </View>
-            <View style={styles.metaCell}>
-              <Text style={styles.metaLabel}>Alternate</Text>
-              <Text style={styles.metaValue}>
-                {summary.alternate?.icao ?? "—"}
-              </Text>
-            </View>
-            <View style={styles.metaCell}>
-              <Text style={styles.metaLabel}>Distance</Text>
-              <Text style={styles.metaValue}>
-                {Math.round(summary.routeDistanceNm).toLocaleString()} NM
-              </Text>
-            </View>
+
+          <View style={s.mastGrid}>
+            {(
+              [
+                ["Flight", request.flightNumber ?? "—"],
+                ["Aircraft", request.aircraftRegistration ?? "—"],
+                ["Level", formatFlightLevel(summary.flightLevel)],
+                ["Departure", summary.departure.icao],
+                ["Destination", summary.destination.icao],
+                [
+                  "Distance",
+                  `${Math.round(summary.routeDistanceNm).toLocaleString()} NM`,
+                ],
+              ] as const
+            ).map(([label, value]) => (
+              <View key={label} style={s.mastCell}>
+                <Text style={s.mastLabel}>{label}</Text>
+                <Text style={s.mastValue}>{value}</Text>
+              </View>
+            ))}
           </View>
-          <View style={styles.routeStrip}>
-            <Text style={styles.routeText}>ROUTE  {briefing.route.raw}</Text>
+
+          <View style={s.routeBand}>
+            <Text style={s.routeText}>ROUTE  {briefing.route.raw}</Text>
           </View>
         </View>
 
-        <SectionHeading title="Executive summary" />
-        <View style={styles.execRow} wrap={false}>
-          <ExecCard
-            label="Expected ride"
-            value={TURBULENCE_LABELS[maxTurb]}
-            hint={expectedRideHint}
-            fg={rideColors.fg}
-            bg={rideColors.bg}
-            border={rideColors.border}
-          />
-          <ExecCard
-            label="Max turbulence"
-            value={TURBULENCE_LABELS[maxTurb]}
-            hint={
-              enroute.turbulence.find((t) => t.intensity === maxTurb)
-                ?.flightLevelBand ?? formatFlightLevel(summary.flightLevel)
-            }
-            fg={rideColors.fg}
-            bg={rideColors.bg}
-            border={rideColors.border}
-          />
-          <ExecCard
-            label="Convective"
-            value={CONVECTIVE_LABELS[maxConv]}
-            hint={
-              enroute.convective.find((c) => c.risk === maxConv)?.segmentLabel ??
-              "Along route"
-            }
-            fg={convColors.fg}
-            bg={convColors.bg}
-            border={convColors.border}
-          />
-          <ExecCard
-            label="Destination"
-            value={destCat}
-            hint={summary.destination.icao}
-            fg={destColors.fg}
-            bg={destColors.bg}
-            border={destColors.border}
-          />
-          <ExecCard
-            label="Op. risk"
-            value={risk.label}
-            hint={
-              threat
-                ? `${briefing.threats.length} threat item(s)`
-                : "No elevated threats"
-            }
-            fg={risk.fg}
-            bg={risk.bg}
-            border={risk.border}
-            last
-          />
-        </View>
-
-        <SectionHeading title="5. Route map" />
-        <View style={styles.legendRow}>
-          {(
-            [
-              ["NONE", "Smooth"],
-              ["LIGHT", "Light"],
-              ["MODERATE", "Moderate"],
-              ["SEVERE", "Severe"],
-            ] as const
-          ).map(([key, label]) => {
-            const colors = turbColors(key);
-            return (
-              <View key={key} style={styles.legendItem}>
+        <View style={s.content}>
+          <View style={s.section}>
+            <Section title="Executive summary" hint="Quick-glance operational status" />
+            <View style={s.execRow} wrap={false}>
+              {(
+                [
+                  {
+                    label: "Expected ride",
+                    value: TURBULENCE_LABELS[maxTurb],
+                    hint:
+                      enroute.turbulence.find((t) => t.intensity === maxTurb)
+                        ?.segmentLabel ?? "Route",
+                    tone: ride,
+                    last: false,
+                  },
+                  {
+                    label: "Max turbulence",
+                    value: TURBULENCE_LABELS[maxTurb],
+                    hint:
+                      enroute.turbulence.find((t) => t.intensity === maxTurb)
+                        ?.flightLevelBand ??
+                      formatFlightLevel(summary.flightLevel),
+                    tone: ride,
+                    last: false,
+                  },
+                  {
+                    label: "Convective",
+                    value: CONVECTIVE_LABELS[maxConv],
+                    hint:
+                      enroute.convective.find((c) => c.risk === maxConv)
+                        ?.segmentLabel ?? "Along route",
+                    tone: conv,
+                    last: false,
+                  },
+                  {
+                    label: "Destination",
+                    value: destCat,
+                    hint: summary.destination.icao,
+                    tone: dest,
+                    last: false,
+                  },
+                  {
+                    label: "Op. risk",
+                    value: risk.label,
+                    hint: topThreat
+                      ? `${briefing.threats.length} threat item(s)`
+                      : "No elevated threats",
+                    tone: risk,
+                    last: true,
+                  },
+                ] as const
+              ).map((card) => (
                 <View
+                  key={card.label}
                   style={[
-                    styles.legendSwatch,
+                    card.last ? s.execCardLast : s.execCard,
                     {
-                      backgroundColor: colors.fg,
-                      borderColor: colors.border,
-                    },
-                  ]}
-                />
-                <Text style={styles.legendText}>{label}</Text>
-              </View>
-            );
-          })}
-        </View>
-        <RouteChart briefing={briefing} />
-
-        <SectionHeading title="1. Flight summary" />
-        <View style={styles.summaryGrid} wrap={false}>
-          <View style={styles.summaryCell}>
-            <Text style={styles.summaryLabel}>City pair</Text>
-            <Text style={styles.summaryValue}>
-              {summary.departure.icao} - {summary.destination.icao}
-            </Text>
-            <Text style={styles.summarySub}>
-              {summary.departure.name.split("/")[0]?.trim()}
-            </Text>
-          </View>
-          <View style={styles.summaryCell}>
-            <Text style={styles.summaryLabel}>Alternate</Text>
-            <Text style={styles.summaryValue}>
-              {summary.alternate?.icao ?? "—"}
-            </Text>
-            <Text style={styles.summarySub}>
-              {summary.alternate?.name.split("/")[0]?.trim() ?? "None filed"}
-            </Text>
-          </View>
-          <View style={styles.summaryCell}>
-            <Text style={styles.summaryLabel}>Level / distance</Text>
-            <Text style={styles.summaryValue}>
-              {formatFlightLevel(summary.flightLevel)}
-            </Text>
-            <Text style={styles.summarySub}>
-              {Math.round(summary.routeDistanceNm).toLocaleString()} NM filed
-            </Text>
-          </View>
-          <View style={styles.summaryCellLast}>
-            <Text style={styles.summaryLabel}>Data / threats</Text>
-            <Text style={styles.summaryValue}>
-              {briefing.dataMode.toUpperCase()}
-            </Text>
-            <Text style={styles.summarySub}>
-              {briefing.threats.length} threat item(s)
-            </Text>
-          </View>
-        </View>
-
-        <Footer generatedAt={summary.generatedAt} />
-      </Page>
-
-      {/* ── Page 2: Airport weather cards ── */}
-      <Page size="A4" style={styles.page}>
-        <SectionHeading title="2. Departure weather" />
-        <AirportCard
-          role="Departure"
-          airport={summary.departure}
-          weather={briefing.departureWeather}
-        />
-
-        <SectionHeading title="3. Destination weather" />
-        <AirportCard
-          role="Destination"
-          airport={summary.destination}
-          weather={briefing.destinationWeather}
-        />
-
-        {summary.alternate && briefing.alternateWeather ? (
-          <>
-            <SectionHeading title="4. Alternate weather" />
-            <AirportCard
-              role="Alternate"
-              airport={summary.alternate}
-              weather={briefing.alternateWeather}
-            />
-          </>
-        ) : null}
-
-        <Footer generatedAt={summary.generatedAt} />
-      </Page>
-
-      {/* ── Page 3: Enroute + waypoint table + turbulence ── */}
-      <Page size="A4" style={styles.page}>
-        <SectionHeading title="6. Enroute weather" />
-        {enroute.alongRouteNotes.map((note) => (
-          <View key={note} style={styles.noteChip} wrap={false}>
-            <Text style={styles.noteText}>{note}</Text>
-          </View>
-        ))}
-
-        <Text
-          style={{
-            fontSize: 7.5,
-            fontFamily: "Helvetica-Bold",
-            color: C.muted,
-            letterSpacing: 0.6,
-            textTransform: "uppercase",
-            marginTop: 6,
-            marginBottom: 4,
-          }}
-        >
-          Waypoint conditions
-        </Text>
-        <WaypointTable briefing={briefing} />
-
-        <Text
-          style={{
-            fontSize: 7.5,
-            fontFamily: "Helvetica-Bold",
-            color: C.muted,
-            letterSpacing: 0.6,
-            textTransform: "uppercase",
-            marginTop: 8,
-            marginBottom: 4,
-          }}
-        >
-          Winds aloft
-        </Text>
-        <View style={styles.table}>
-          <View style={styles.tableHead} wrap={false}>
-            <Text style={[styles.th, { width: "28%" }]}>Segment</Text>
-            <Text style={[styles.th, { width: "12%" }]}>FL</Text>
-            <Text style={[styles.th, { width: "20%" }]}>Wind</Text>
-            <Text style={[styles.th, { width: "16%" }]}>Temp</Text>
-            <Text style={[styles.th, { width: "12%" }]}>Cloud</Text>
-            <Text style={[styles.th, { width: "12%" }]}>Shear</Text>
-          </View>
-          {enroute.windsAloft.slice(0, 14).map((sample, index) => (
-            <View
-              key={`${sample.label}-${sample.point.latitude}-${index}`}
-              style={[
-                styles.tr,
-                {
-                  backgroundColor: index % 2 === 1 ? C.panelAlt : C.white,
-                },
-              ]}
-              wrap={false}
-            >
-              <Text style={[styles.td, { width: "28%" }]}>{sample.label}</Text>
-              <Text style={[styles.td, { width: "12%", fontFamily: "Courier" }]}>
-                {sample.flightLevel}
-              </Text>
-              <Text style={[styles.td, { width: "20%", fontFamily: "Courier" }]}>
-                {String(sample.windDirectionDeg).padStart(3, "0")}/
-                {sample.windSpeedKt}kt
-              </Text>
-              <Text style={[styles.td, { width: "16%" }]}>
-                {sample.temperatureC}°C
-              </Text>
-              <Text style={[styles.td, { width: "12%" }]}>
-                {sample.cloudCoverPct !== null
-                  ? `${sample.cloudCoverPct}%`
-                  : "—"}
-              </Text>
-              <Text style={[styles.td, { width: "12%" }]}>
-                {sample.shearProxyKtPer1000Ft ?? "—"}
-              </Text>
-            </View>
-          ))}
-        </View>
-
-        <SectionHeading title="7. Turbulence briefing" />
-        {enroute.turbulence.map((turb) => (
-          <View key={turb.segmentLabel} style={styles.turbCard} wrap={false}>
-            <View style={styles.turbTop}>
-              <Text style={styles.turbSeg}>{turb.segmentLabel}</Text>
-              <RideBadge intensity={turb.intensity} />
-            </View>
-            <Text style={{ fontSize: 8.5, color: C.ink, lineHeight: 1.3 }}>
-              {shortPilotLine(turb.pilotText)}
-            </Text>
-            <View style={styles.turbMeta}>
-              <Text style={styles.turbMetaItem}>
-                FL{" "}
-                <Text style={styles.turbMetaStrong}>{turb.flightLevelBand}</Text>
-              </Text>
-              <Text style={styles.turbMetaItem}>
-                Duration{" "}
-                <Text style={styles.turbMetaStrong}>
-                  {turb.expectedDuration}
-                </Text>
-              </Text>
-              <Text style={styles.turbMetaItem}>
-                Cause{" "}
-                <Text style={styles.turbMetaStrong}>
-                  {turb.likelyCause.split("_").join(" ")}
-                </Text>
-              </Text>
-              <Text style={styles.turbMetaItem}>
-                Confidence{" "}
-                <Text style={styles.turbMetaStrong}>{turb.confidence}</Text>
-              </Text>
-            </View>
-          </View>
-        ))}
-
-        <Footer generatedAt={summary.generatedAt} />
-      </Page>
-
-      {/* ── Page 4: SIGMETs + operational summary ── */}
-      <Page size="A4" style={styles.page}>
-        <SectionHeading title="SIGMETs" />
-        {enroute.sigmets.length === 0 ? (
-          <View style={styles.noteChip}>
-            <Text style={styles.noteText}>No route-corridor SIGMETs.</Text>
-          </View>
-        ) : (
-          enroute.sigmets.map((sigmet) => (
-            <View
-              key={sigmet.id}
-              style={[
-                styles.turbCard,
-                { borderLeftWidth: 3, borderLeftColor: C.amber },
-              ]}
-              wrap={false}
-            >
-              <View style={styles.turbTop}>
-                <Text style={styles.turbSeg}>{sigmet.summary}</Text>
-                <Text
-                  style={[
-                    styles.badge,
-                    {
-                      color: C.amber,
-                      backgroundColor: C.amberBg,
-                      borderColor: "#fde68a",
+                      backgroundColor: card.tone.bg,
+                      borderColor: card.tone.bd,
                     },
                   ]}
                 >
-                  {sigmet.hazard}
+                  <Text style={s.execLabel}>{card.label}</Text>
+                  <Text style={[s.execValue, { color: card.tone.fg }]}>
+                    {card.value}
+                  </Text>
+                  <Text style={s.execHint}>{card.hint}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View style={s.section}>
+            <Section
+              title="1. Flight summary"
+              hint={`${summary.alternate?.icao ? `ALTN ${summary.alternate.icao}` : "No alternate"} · ${briefing.dataMode.toUpperCase()}`}
+            />
+            <View style={s.summaryRow} wrap={false}>
+              <View style={s.summaryCell}>
+                <Text style={s.kicker}>City pair</Text>
+                <Text style={s.strong}>
+                  {summary.departure.icao} - {summary.destination.icao}
+                </Text>
+                <Text style={s.faint}>
+                  {summary.departure.name.split("/")[0]?.trim()}
                 </Text>
               </View>
-              <Text style={{ fontSize: 7, color: C.muted, marginBottom: 3 }}>
-                {formatUtc(sigmet.validFrom, "ddHHmm")}–
-                {formatUtc(sigmet.validTo, "ddHHmm")}Z
-                {sigmet.severity !== "UNKNOWN" ? ` · ${sigmet.severity}` : ""}
-              </Text>
-              <View style={styles.rawBlock}>
-                <Text style={styles.rawLabel}>Raw SIGMET</Text>
-                <Text style={styles.mono}>{truncateRaw(sigmet.raw, 280)}</Text>
+              <View style={s.summaryCell}>
+                <Text style={s.kicker}>Alternate</Text>
+                <Text style={s.strong}>{summary.alternate?.icao ?? "—"}</Text>
+                <Text style={s.faint}>
+                  {summary.alternate?.name.split("/")[0]?.trim() ?? "None filed"}
+                </Text>
+              </View>
+              <View style={s.summaryCell}>
+                <Text style={s.kicker}>Level / distance</Text>
+                <Text style={s.strong}>
+                  {formatFlightLevel(summary.flightLevel)}
+                </Text>
+                <Text style={s.faint}>
+                  {Math.round(summary.routeDistanceNm).toLocaleString()} NM filed
+                </Text>
+              </View>
+              <View style={s.summaryCellLast}>
+                <Text style={s.kicker}>Threats</Text>
+                <Text style={s.strong}>{briefing.threats.length}</Text>
+                <Text style={s.faint}>
+                  {topThreat ? `Highest: ${topThreat}` : "None raised"}
+                </Text>
               </View>
             </View>
-          ))
-        )}
-
-        <SectionHeading title="8. Operational weather summary" />
-        {enroute.dispatchBullets.map((bullet) => (
-          <View key={bullet} style={styles.bulletRow} wrap={false}>
-            <Text style={styles.bulletMark}>•</Text>
-            <Text style={styles.bulletText}>{bullet}</Text>
           </View>
-        ))}
 
-        {briefing.threats.length > 0 ? (
-          <View style={{ marginTop: 10 }}>
-            <Text
-              style={{
-                fontSize: 7.5,
-                fontFamily: "Helvetica-Bold",
-                color: C.muted,
-                letterSpacing: 0.6,
-                textTransform: "uppercase",
-                marginBottom: 4,
-              }}
-            >
-              Threat board
-            </Text>
-            {briefing.threats.map((item) => {
-              const colors =
-                item.severity === "CRITICAL" || item.severity === "WARNING"
-                  ? { fg: C.red, bg: C.redBg, border: "#fecaca" }
-                  : item.severity === "CAUTION"
-                    ? { fg: C.amber, bg: C.amberBg, border: "#fde68a" }
-                    : { fg: C.blue, bg: C.blueBg, border: "#bfdbfe" };
+          <View style={s.section}>
+            <Section
+              title="5. Route weather map"
+              hint="Same operational map as the EFB display"
+            />
+            <View style={s.legendRow}>
+              {(
+                [
+                  ["NONE", "Smooth"],
+                  ["LIGHT", "Light"],
+                  ["MODERATE", "Moderate"],
+                  ["SEVERE", "Severe"],
+                ] as const
+              ).map(([key, label]) => {
+                const tone = turbTone(key);
+                return (
+                  <View key={key} style={s.legendItem}>
+                    <View
+                      style={[
+                        s.legendDot,
+                        { backgroundColor: tone.fg, borderColor: tone.bd },
+                      ]}
+                    />
+                    <Text style={s.legendText}>{label}</Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            {mapImageDataUrl ? (
+              <View style={s.mapShell} wrap={false}>
+                {/* react-pdf Image — not a DOM <img>; a11y rule does not apply */}
+                {/* eslint-disable-next-line jsx-a11y/alt-text */}
+                <Image src={mapImageDataUrl} style={s.mapImage} />
+                <View style={s.mapFooter}>
+                  <Text style={s.mapFooterText}>
+                    Filed waypoint route · radar · SIGMET · turbulence · cloud ·
+                    METAR stations · jet stream
+                  </Text>
+                  <Text style={s.mapFooterText}>
+                    {Math.round(summary.routeDistanceNm).toLocaleString()} NM ·{" "}
+                    {briefing.route.fixes.length} waypoints
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <View style={s.mapMissing} wrap={false}>
+                <Text style={{ fontSize: 8, color: mute }}>
+                  Live map capture unavailable for this export.
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+
+        <Footer generatedAt={summary.generatedAt} />
+      </Page>
+
+      {/* PAGE 2 — airport weather */}
+      <Page size="A4" style={s.page}>
+        <View style={[s.content, { paddingTop: 22 }]}>
+          <Section title="2. Departure weather" />
+          <AirportCard
+            role="Departure"
+            airport={summary.departure}
+            weather={briefing.departureWeather}
+          />
+
+          <Section title="3. Destination weather" />
+          <AirportCard
+            role="Destination"
+            airport={summary.destination}
+            weather={briefing.destinationWeather}
+          />
+
+          {summary.alternate && briefing.alternateWeather ? (
+            <>
+              <Section title="4. Alternate weather" />
+              <AirportCard
+                role="Alternate"
+                airport={summary.alternate}
+                weather={briefing.alternateWeather}
+              />
+            </>
+          ) : null}
+        </View>
+        <Footer generatedAt={summary.generatedAt} />
+      </Page>
+
+      {/* PAGE 3 — enroute tables + turbulence */}
+      <Page size="A4" style={s.page}>
+        <View style={[s.content, { paddingTop: 22 }]}>
+          <Section title="6. Enroute weather" hint="Along the filed ATC route" />
+
+          {enroute.alongRouteNotes.map((note) => (
+            <View key={note} style={s.note} wrap={false}>
+              <Text style={s.noteText}>{note}</Text>
+            </View>
+          ))}
+
+          <Text
+            style={{
+              fontSize: 7,
+              fontFamily: "Helvetica-Bold",
+              color: mute,
+              letterSpacing: 0.6,
+              textTransform: "uppercase",
+              marginTop: 8,
+              marginBottom: 4,
+            }}
+          >
+            Waypoint conditions
+          </Text>
+          <View style={s.table}>
+            <View style={s.thead} wrap={false}>
+              <Text style={[s.th, { width: "13%" }]}>Fix</Text>
+              <Text style={[s.th, { width: "12%" }]}>Ride</Text>
+              <Text style={[s.th, { width: "16%" }]}>Wind</Text>
+              <Text style={[s.th, { width: "10%" }]}>Temp</Text>
+              <Text style={[s.th, { width: "10%" }]}>Cloud</Text>
+              <Text style={[s.th, { width: "39%" }]}>Remark</Text>
+            </View>
+            {briefing.route.fixes.map((fix, index) => {
+              const condition = byFix.get(fix.name);
+              const turb = turbFrom.get(fix.name);
+              const intensity =
+                condition?.turbulence ?? turb?.intensity ?? "NONE";
+              const tone = turbTone(intensity);
+              const wind =
+                condition?.windDirectionDeg != null &&
+                condition.windSpeedKt != null
+                  ? `${String(condition.windDirectionDeg).padStart(3, "0")}/${condition.windSpeedKt}kt`
+                  : "—";
+              const remark = turb
+                ? shortLine(turb.pilotText)
+                : (condition?.forecastNote ?? "—");
               return (
                 <View
-                  key={item.id}
+                  key={fix.id}
                   style={[
-                    styles.turbCard,
-                    { backgroundColor: colors.bg, borderColor: colors.border },
+                    s.tr,
+                    { backgroundColor: index % 2 ? softAlt : white },
                   ]}
                   wrap={false}
                 >
-                  <View style={styles.turbTop}>
-                    <Text style={styles.turbSeg}>{item.title}</Text>
-                    <Text
-                      style={[
-                        styles.badge,
-                        {
-                          color: colors.fg,
-                          backgroundColor: C.white,
-                          borderColor: colors.border,
-                        },
-                      ]}
-                    >
-                      {item.severity}
-                    </Text>
-                  </View>
-                  <Text style={{ fontSize: 8, color: C.inkSoft }}>
-                    {item.detail}
+                  <Text
+                    style={[
+                      s.td,
+                      { width: "13%", fontFamily: "Helvetica-Bold" },
+                    ]}
+                  >
+                    {fix.name}
                   </Text>
+                  <View style={{ width: "12%" }}>
+                    <Badge
+                      label={TURBULENCE_LABELS[intensity].toUpperCase()}
+                      fg={tone.fg}
+                      bg={tone.bg}
+                      bd={tone.bd}
+                    />
+                  </View>
+                  <Text
+                    style={[s.td, { width: "16%", fontFamily: "Courier" }]}
+                  >
+                    {wind}
+                  </Text>
+                  <Text style={[s.td, { width: "10%" }]}>
+                    {condition?.temperatureC != null
+                      ? `${condition.temperatureC}°C`
+                      : "—"}
+                  </Text>
+                  <Text style={[s.td, { width: "10%" }]}>
+                    {condition?.cloudCoverPct != null
+                      ? `${condition.cloudCoverPct}%`
+                      : "—"}
+                  </Text>
+                  <Text style={[s.tdMute, { width: "39%" }]}>{remark}</Text>
                 </View>
               );
             })}
           </View>
-        ) : null}
 
+          <Text
+            style={{
+              fontSize: 7,
+              fontFamily: "Helvetica-Bold",
+              color: mute,
+              letterSpacing: 0.6,
+              textTransform: "uppercase",
+              marginTop: 4,
+              marginBottom: 4,
+            }}
+          >
+            Winds aloft
+          </Text>
+          <View style={s.table}>
+            <View style={s.thead} wrap={false}>
+              <Text style={[s.th, { width: "28%" }]}>Segment</Text>
+              <Text style={[s.th, { width: "12%" }]}>FL</Text>
+              <Text style={[s.th, { width: "20%" }]}>Wind</Text>
+              <Text style={[s.th, { width: "14%" }]}>Temp</Text>
+              <Text style={[s.th, { width: "13%" }]}>Cloud</Text>
+              <Text style={[s.th, { width: "13%" }]}>Shear</Text>
+            </View>
+            {enroute.windsAloft.slice(0, 14).map((sample, index) => (
+              <View
+                key={`${sample.label}-${index}`}
+                style={[
+                  s.tr,
+                  { backgroundColor: index % 2 ? softAlt : white },
+                ]}
+                wrap={false}
+              >
+                <Text style={[s.td, { width: "28%" }]}>{sample.label}</Text>
+                <Text style={[s.td, { width: "12%", fontFamily: "Courier" }]}>
+                  {sample.flightLevel}
+                </Text>
+                <Text style={[s.td, { width: "20%", fontFamily: "Courier" }]}>
+                  {String(sample.windDirectionDeg).padStart(3, "0")}/
+                  {sample.windSpeedKt}kt
+                </Text>
+                <Text style={[s.td, { width: "14%" }]}>
+                  {sample.temperatureC}°C
+                </Text>
+                <Text style={[s.td, { width: "13%" }]}>
+                  {sample.cloudCoverPct != null
+                    ? `${sample.cloudCoverPct}%`
+                    : "—"}
+                </Text>
+                <Text style={[s.td, { width: "13%" }]}>
+                  {sample.shearProxyKtPer1000Ft ?? "—"}
+                </Text>
+              </View>
+            ))}
+          </View>
+
+          <Section title="7. Turbulence briefing" />
+          {enroute.turbulence.map((turb) => {
+            const tone = turbTone(turb.intensity);
+            return (
+              <View key={turb.segmentLabel} style={s.turbCard} wrap={false}>
+                <View style={s.turbTop}>
+                  <Text style={s.turbSeg}>{turb.segmentLabel}</Text>
+                  <Badge
+                    label={TURBULENCE_LABELS[turb.intensity].toUpperCase()}
+                    fg={tone.fg}
+                    bg={tone.bg}
+                    bd={tone.bd}
+                  />
+                </View>
+                <Text style={{ fontSize: 8.5, color: ink }}>
+                  {shortLine(turb.pilotText)}
+                </Text>
+                <View style={s.metaRow}>
+                  <Text style={s.metaItem}>
+                    FL <Text style={s.metaStrong}>{turb.flightLevelBand}</Text>
+                  </Text>
+                  <Text style={s.metaItem}>
+                    Duration{" "}
+                    <Text style={s.metaStrong}>{turb.expectedDuration}</Text>
+                  </Text>
+                  <Text style={s.metaItem}>
+                    Cause{" "}
+                    <Text style={s.metaStrong}>
+                      {turb.likelyCause.split("_").join(" ")}
+                    </Text>
+                  </Text>
+                  <Text style={s.metaItem}>
+                    Confidence{" "}
+                    <Text style={s.metaStrong}>{turb.confidence}</Text>
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+        <Footer generatedAt={summary.generatedAt} />
+      </Page>
+
+      {/* PAGE 4 — SIGMETs + ops summary */}
+      <Page size="A4" style={s.page}>
+        <View style={[s.content, { paddingTop: 22 }]}>
+          <Section title="SIGMETs" hint="Route corridor" />
+          {enroute.sigmets.length === 0 ? (
+            <View style={s.note}>
+              <Text style={s.noteText}>No route-corridor SIGMETs.</Text>
+            </View>
+          ) : (
+            enroute.sigmets.map((sigmet) => (
+              <View
+                key={sigmet.id}
+                style={[
+                  s.turbCard,
+                  { borderLeftWidth: 3, borderLeftColor: amber },
+                ]}
+                wrap={false}
+              >
+                <View style={s.turbTop}>
+                  <Text style={s.turbSeg}>{sigmet.summary}</Text>
+                  <Badge
+                    label={sigmet.hazard}
+                    fg={amber}
+                    bg={amberBg}
+                    bd="#fde68a"
+                  />
+                </View>
+                <Text style={{ fontSize: 7, color: mute, marginBottom: 3 }}>
+                  {formatUtc(sigmet.validFrom, "ddHHmm")}–
+                  {formatUtc(sigmet.validTo, "ddHHmm")}Z
+                  {sigmet.severity !== "UNKNOWN" ? ` · ${sigmet.severity}` : ""}
+                </Text>
+                <View style={s.rawBox}>
+                  <Text style={s.rawLabel}>Raw SIGMET</Text>
+                  <Text style={s.mono}>{clip(sigmet.raw, 260)}</Text>
+                </View>
+              </View>
+            ))
+          )}
+
+          <Section title="8. Operational weather summary" />
+          {enroute.dispatchBullets.map((bullet) => (
+            <View key={bullet} style={s.bullet} wrap={false}>
+              <Text style={s.bulletMark}>•</Text>
+              <Text style={s.bulletText}>{bullet}</Text>
+            </View>
+          ))}
+
+          {briefing.threats.length > 0 ? (
+            <View style={{ marginTop: 10 }}>
+              <Section title="Threat board" />
+              {briefing.threats.map((item) => {
+                const tone =
+                  item.severity === "CRITICAL" || item.severity === "WARNING"
+                    ? { fg: red, bg: redBg, bd: "#fecaca" }
+                    : item.severity === "CAUTION"
+                      ? { fg: amber, bg: amberBg, bd: "#fde68a" }
+                      : { fg: blue, bg: blueBg, bd: "#bfdbfe" };
+                return (
+                  <View
+                    key={item.id}
+                    style={[
+                      s.turbCard,
+                      { backgroundColor: tone.bg, borderColor: tone.bd },
+                    ]}
+                    wrap={false}
+                  >
+                    <View style={s.turbTop}>
+                      <Text style={s.turbSeg}>{item.title}</Text>
+                      <Badge
+                        label={item.severity}
+                        fg={tone.fg}
+                        bg={white}
+                        bd={tone.bd}
+                      />
+                    </View>
+                    <Text style={{ fontSize: 8, color: slate }}>
+                      {item.detail}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
         <Footer generatedAt={summary.generatedAt} />
       </Page>
     </Document>

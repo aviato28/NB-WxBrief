@@ -20,12 +20,20 @@ export function BriefingToolbar({
   async function handleExport(): Promise<void> {
     setExporting(true);
     try {
-      const [{ pdf }, { BriefingPdfDocument }] = await Promise.all([
-        import("@react-pdf/renderer"),
-        import("@/components/briefing/briefing-pdf-document"),
-      ]);
+      const [{ pdf }, { BriefingPdfDocument }, { captureBriefingMapImage }] =
+        await Promise.all([
+          import("@react-pdf/renderer"),
+          import("@/components/briefing/briefing-pdf-document"),
+          import("@/lib/pdf-map-capture"),
+        ]);
+
+      const mapImageDataUrl = await captureBriefingMapImage(briefing);
+
       const blob = await pdf(
-        <BriefingPdfDocument briefing={briefing} />,
+        <BriefingPdfDocument
+          briefing={briefing}
+          mapImageDataUrl={mapImageDataUrl}
+        />,
       ).toBlob();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
