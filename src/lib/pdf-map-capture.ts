@@ -62,6 +62,57 @@ function labeledIcon(name: string, accent: string): L.DivIcon {
   });
 }
 
+/**
+ * Reject near-black / empty captures that previously produced a solid black
+ * PDF map block (dark basemap + failed/untainted Leaflet tiles).
+ */
+async function isUsableMapImage(dataUrl: string): Promise<boolean> {
+  if (!dataUrl.startsWith("data:image/")) return false;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = Math.min(96, img.naturalWidth || 96);
+        const h = Math.min(54, img.naturalHeight || 54);
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+          resolve(false);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        const { data } = ctx.getImageData(0, 0, w, h);
+        let lit = 0;
+        let samples = 0;
+        let distinct = 0;
+        const buckets = new Uint8Array(16);
+        for (let i = 0; i < data.length; i += 16) {
+          const r = data[i] ?? 0;
+          const g = data[i + 1] ?? 0;
+          const b = data[i + 2] ?? 0;
+          const a = data[i + 3] ?? 0;
+          if (a < 8) continue;
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (lum > 28) lit += 1;
+          buckets[Math.min(15, Math.floor(lum / 16))]! += 1;
+          samples += 1;
+        }
+        for (let i = 0; i < buckets.length; i += 1) {
+          if ((buckets[i] ?? 0) > 0) distinct += 1;
+        }
+        // Need some non-near-black pixels and a bit of tonal variety
+        resolve(samples > 0 && lit / samples > 0.04 && distinct >= 3);
+      } catch {
+        resolve(false);
+      }
+    };
+    img.onerror = () => resolve(false);
+    img.src = dataUrl;
+  });
+}
+
 async function fetchRainViewerTiles(): Promise<{
   radar: string | null;
   satellite: string | null;
@@ -116,14 +167,19 @@ async function captureVisibleMap(): Promise<string | null> {
     host?.querySelector<HTMLElement>(".leaflet-container") ?? null;
   if (!container) return null;
 
-  // Invalidate size so tiles settle before snapshot.
   const map = window.__NB_WXBRIEF_MAP__;
   if (map) {
     map.invalidateSize();
-    await new Promise((r) => window.setTimeout(r, 400));
+    await new Promise((r) => window.setTimeout(r, 600));
   }
 
-  return captureElement(container);
+  const png = await captureElement(container);
+  if (!png) return null;
+  if (!(await isUsableMapImage(png))) {
+    console.warn("[pdf-map-capture] visible map rejected (blank/dark)");
+    return null;
+  }
+  return png;
 }
 
 async function captureViaApi(
@@ -176,12 +232,17 @@ async function captureViaApi(
       return null;
     }
     const blob = await res.blob();
-    return await new Promise<string>((resolve, reject) => {
+    const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result));
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(blob);
     });
+    if (!(await isUsableMapImage(dataUrl))) {
+      console.warn("[pdf-map-capture] API map rejected (blank)");
+      return null;
+    }
+    return dataUrl;
   } catch (error) {
     console.warn("[pdf-map-capture] API map error:", error);
     return null;
@@ -201,7 +262,7 @@ async function captureOffscreen(
     `width:${CAPTURE_WIDTH}px`,
     `height:${CAPTURE_HEIGHT}px`,
     "z-index:-1",
-    "background:#0b0e13",
+    "background:#d9e6f2",
   ].join(";");
   document.body.appendChild(host);
 
@@ -218,19 +279,20 @@ async function captureOffscreen(
   });
 
   try {
+    // Light basemap for print readability
     L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
       { subdomains: "abcd", maxZoom: 18, crossOrigin: true },
     ).addTo(map);
 
     if (radar) {
-      L.tileLayer(radar, { opacity: 0.55, maxZoom: 12, crossOrigin: true }).addTo(
+      L.tileLayer(radar, { opacity: 0.45, maxZoom: 12, crossOrigin: true }).addTo(
         map,
       );
     }
     if (satellite) {
       L.tileLayer(satellite, {
-        opacity: 0.35,
+        opacity: 0.3,
         maxZoom: 12,
         crossOrigin: true,
       }).addTo(map);
@@ -241,7 +303,12 @@ async function captureOffscreen(
     );
     if (pathLatLngs.length > 1) {
       L.polyline(pathLatLngs, {
-        color: "#4aa3ff",
+        color: "#ffffff",
+        weight: MAP_ROUTE_WEIGHT + 4,
+        opacity: 0.95,
+      }).addTo(map);
+      L.polyline(pathLatLngs, {
+        color: "#0b4f8a",
         weight: MAP_ROUTE_WEIGHT + 1,
         opacity: 0.95,
       }).addTo(map);
@@ -252,9 +319,9 @@ async function captureOffscreen(
       .map((s) => [s.point.latitude, s.point.longitude] as [number, number]);
     if (jet.length > 1) {
       L.polyline(jet, {
-        color: "#f472b6",
+        color: "#db2777",
         weight: 4,
-        opacity: 0.75,
+        opacity: 0.7,
         dashArray: "8 6",
       }).addTo(map);
     }
@@ -333,12 +400,18 @@ async function captureOffscreen(
     }
 
     await new Promise<void>((resolve) => {
-      map.once("moveend", () => window.setTimeout(() => resolve(), 1000));
-      window.setTimeout(() => resolve(), 3500);
+      map.once("moveend", () => window.setTimeout(() => resolve(), 1200));
+      window.setTimeout(() => resolve(), 4000);
     });
-    await new Promise((r) => window.setTimeout(r, 800));
+    await new Promise((r) => window.setTimeout(r, 1000));
 
-    return await captureElement(mapNode);
+    const png = await captureElement(mapNode);
+    if (!png) return null;
+    if (!(await isUsableMapImage(png))) {
+      console.warn("[pdf-map-capture] offscreen rejected (blank/dark)");
+      return null;
+    }
+    return png;
   } catch (error) {
     console.warn("[pdf-map-capture] offscreen failed:", error);
     return null;
@@ -350,7 +423,8 @@ async function captureOffscreen(
 
 /**
  * Produce a high-resolution map image for PDF embedding.
- * Preference order: visible Leaflet map → server tile mosaic → offscreen Leaflet.
+ * Preference: server tile mosaic (print-safe light basemap) → offscreen → visible.
+ * Blank/near-black captures are rejected so the PDF can fall back to vector chart.
  */
 export async function captureBriefingMapImage(
   briefing: WeatherBriefing,
@@ -359,11 +433,14 @@ export async function captureBriefingMapImage(
 
   const tiles = await fetchRainViewerTiles();
 
-  const visible = await captureVisibleMap();
-  if (visible) return visible;
-
   const api = await captureViaApi(briefing, tiles.radar);
   if (api) return api;
 
-  return captureOffscreen(briefing, tiles.radar, tiles.satellite);
+  const offscreen = await captureOffscreen(briefing, tiles.radar, tiles.satellite);
+  if (offscreen) return offscreen;
+
+  const visible = await captureVisibleMap();
+  if (visible) return visible;
+
+  return null;
 }

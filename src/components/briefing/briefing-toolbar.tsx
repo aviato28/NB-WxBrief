@@ -20,25 +20,13 @@ export function BriefingToolbar({
   async function handleExport(): Promise<void> {
     setExporting(true);
     try {
-      document
-        .querySelector("[data-nb-route-map]")
-        ?.scrollIntoView({ behavior: "instant", block: "center" });
-      await new Promise((r) => window.setTimeout(r, 350));
-
-      const [{ pdf }, { BriefingPdfDocument }, { captureBriefingMapImage }] =
-        await Promise.all([
-          import("@react-pdf/renderer"),
-          import("@/components/briefing/briefing-pdf-document"),
-          import("@/lib/pdf-map-capture"),
-        ]);
-
-      const mapImageDataUrl = await captureBriefingMapImage(briefing);
+      const [{ pdf }, { BriefingPdfDocument }] = await Promise.all([
+        import("@react-pdf/renderer"),
+        import("@/components/briefing/briefing-pdf-document"),
+      ]);
 
       const blob = await pdf(
-        <BriefingPdfDocument
-          briefing={briefing}
-          mapImageDataUrl={mapImageDataUrl}
-        />,
+        <BriefingPdfDocument briefing={briefing} />,
       ).toBlob();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");

@@ -2,6 +2,9 @@
 
 Tablet-first airline weather briefing web app.
 
+Brand mark: radar-arc **NB** monogram (`src/components/brand/`) — used in the app
+header, home, favicon, and PDF masthead.
+
 ## Stack
 
 - Next.js 15 (App Router) + TypeScript (strict)

@@ -57,7 +57,7 @@ export function BriefingView({
     <div className="space-y-4 animate-in fade-in duration-300">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="efb-label">Operational briefing</p>
+          <p className="efb-label">NB-WxBrief · Operational briefing</p>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
             {briefing.request.flightNumber
               ? `${briefing.request.flightNumber} · `
