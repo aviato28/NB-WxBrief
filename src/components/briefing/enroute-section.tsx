@@ -116,6 +116,10 @@ export function EnrouteSection({
         <h3 className="efb-label mb-2">
           Turbulence briefing · cruise ±4000 ft
         </h3>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Advisory only — derived from Open-Meteo wind shear/jet cues plus route
+          SIGMETs. Not a certified PIREP or GTG product; verify operationally.
+        </p>
         <div className="space-y-3">
           {segments.map((segment) => {
             const items = enroute.turbulence.filter(

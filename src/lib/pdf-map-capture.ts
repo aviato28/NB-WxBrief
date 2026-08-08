@@ -205,12 +205,17 @@ async function captureViaApi(
         points: s.polygon!.map((p) => ({ lat: p.latitude, lon: p.longitude })),
       }));
     const turbulence = briefing.enroute.turbulence
+      .filter((t) => t.altitudeBand === "cruise")
       .map((t) => {
-        const fix = briefing.route.fixes.find((f) => f.name === t.fromFix);
-        if (!fix?.coordinates) return null;
+        const from = briefing.route.fixes.find((f) => f.name === t.fromFix);
+        const to = briefing.route.fixes.find((f) => f.name === t.toFix);
+        if (!from?.coordinates || !to?.coordinates) return null;
+        // Place turb sample mid-leg so it does not collide with waypoint markers.
         return {
-          lat: fix.coordinates.latitude,
-          lon: fix.coordinates.longitude,
+          lat:
+            (from.coordinates.latitude + to.coordinates.latitude) / 2,
+          lon:
+            (from.coordinates.longitude + to.coordinates.longitude) / 2,
           intensity: t.intensity,
         };
       })
