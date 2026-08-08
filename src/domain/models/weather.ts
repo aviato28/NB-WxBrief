@@ -108,13 +108,30 @@ export interface WindsAloftSample {
   readonly windSpeedKt: number;
   readonly temperatureC: number;
   readonly shearProxyKtPer1000Ft: number | null;
+  readonly cloudCoverPct: number | null;
 }
 
 export type TurbulenceIntensity = "NONE" | "LIGHT" | "MODERATE" | "SEVERE";
 
+export type TurbulenceConfidence = "LOW" | "MEDIUM" | "HIGH";
+
+export type TurbulenceCause =
+  | "JET_STREAM_SHEAR"
+  | "CONVECTIVE"
+  | "MOUNTAIN_WAVE"
+  | "CLEAR_AIR"
+  | "UNKNOWN";
+
 export interface TurbulenceAssessment {
   readonly segmentLabel: string;
+  readonly fromFix: string;
+  readonly toFix: string;
   readonly intensity: TurbulenceIntensity;
+  readonly flightLevelBand: string;
+  readonly expectedDuration: string;
+  readonly likelyCause: TurbulenceCause;
+  readonly confidence: TurbulenceConfidence;
+  readonly pilotText: string;
   readonly notes: string;
 }
 
@@ -126,12 +143,26 @@ export interface ConvectiveAssessment {
   readonly notes: string;
 }
 
+export interface WaypointCondition {
+  readonly fixName: string;
+  readonly point: GeoPoint;
+  readonly windDirectionDeg: number | null;
+  readonly windSpeedKt: number | null;
+  readonly temperatureC: number | null;
+  readonly turbulence: TurbulenceIntensity;
+  readonly cloudCoverPct: number | null;
+  readonly nearbySigmetIds: readonly string[];
+  readonly forecastNote: string;
+}
+
 export interface EnrouteWeather {
   readonly windsAloft: readonly WindsAloftSample[];
   readonly turbulence: readonly TurbulenceAssessment[];
   readonly convective: readonly ConvectiveAssessment[];
   readonly alongRouteNotes: readonly string[];
   readonly sigmets: readonly Sigmet[];
+  readonly waypointConditions: readonly WaypointCondition[];
+  readonly dispatchBullets: readonly string[];
 }
 
 export type ThreatSeverity = "INFO" | "CAUTION" | "WARNING" | "CRITICAL";

@@ -54,10 +54,36 @@ export const THREAT_SEVERITY_STYLES: Record<
 };
 
 export const TURBULENCE_LABELS: Record<TurbulenceIntensity, string> = {
-  NONE: "None expected",
+  NONE: "Smooth",
   LIGHT: "Light",
   MODERATE: "Moderate",
   SEVERE: "Severe",
+};
+
+export const TURBULENCE_STYLES: Record<
+  TurbulenceIntensity,
+  { readonly bg: string; readonly text: string; readonly border: string }
+> = {
+  NONE: {
+    bg: "bg-emerald-500/15",
+    text: "text-emerald-300",
+    border: "border-emerald-500/30",
+  },
+  LIGHT: {
+    bg: "bg-sky-500/15",
+    text: "text-sky-300",
+    border: "border-sky-500/30",
+  },
+  MODERATE: {
+    bg: "bg-amber-500/15",
+    text: "text-amber-300",
+    border: "border-amber-500/30",
+  },
+  SEVERE: {
+    bg: "bg-red-500/15",
+    text: "text-red-300",
+    border: "border-red-500/30",
+  },
 };
 
 export const CONVECTIVE_LABELS: Record<ConvectiveRisk, string> = {

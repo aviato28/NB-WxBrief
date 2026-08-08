@@ -5,11 +5,10 @@ import type { ComponentProps } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const RouteMapInner = dynamic(
-  () =>
-    import("@/components/map/route-map").then((mod) => mod.RouteMap),
+  () => import("@/components/map/route-map").then((mod) => mod.RouteMap),
   {
     ssr: false,
-    loading: () => <Skeleton className="h-64 w-full rounded-md sm:h-80" />,
+    loading: () => <Skeleton className="h-80 w-full rounded-md sm:h-[28rem]" />,
   },
 );
 

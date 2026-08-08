@@ -36,6 +36,8 @@ export async function fetchBriefing(
       alternateIcao: request.alternateIcao ?? "",
       atcRoute: request.atcRoute,
       flightLevel: request.flightLevel,
+      flightNumber: request.flightNumber ?? "",
+      aircraftRegistration: request.aircraftRegistration ?? "",
     }),
   });
 

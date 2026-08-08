@@ -12,6 +12,8 @@ export function toFlightRequest(
     alternateIcao: (parsed.alternateIcao as IcaoCode | null) ?? null,
     atcRoute: parsed.atcRoute,
     flightLevel: parsed.flightLevel as FlightLevel,
+    flightNumber: parsed.flightNumber,
+    aircraftRegistration: parsed.aircraftRegistration,
   };
 }
 
@@ -26,6 +28,12 @@ export function flightRequestToSearchParams(
   if (request.alternateIcao) {
     params.set("altn", request.alternateIcao);
   }
+  if (request.flightNumber) {
+    params.set("fn", request.flightNumber);
+  }
+  if (request.aircraftRegistration) {
+    params.set("reg", request.aircraftRegistration);
+  }
   return params;
 }
 
@@ -38,6 +46,8 @@ export function flightRequestFromSearchParams(
     alternateIcao: params.get("altn") ?? "",
     atcRoute: params.get("route") ?? "",
     flightLevel: params.get("fl") ?? "",
+    flightNumber: params.get("fn") ?? "",
+    aircraftRegistration: params.get("reg") ?? "",
   });
 
   if (!result.success) {
@@ -55,5 +65,7 @@ export function briefingQueryKey(request: FlightRequest): readonly unknown[] {
     request.alternateIcao,
     request.flightLevel,
     request.atcRoute,
+    request.flightNumber,
+    request.aircraftRegistration,
   ] as const;
 }

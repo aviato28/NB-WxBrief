@@ -11,4 +11,15 @@ export const MOCK_NETWORK_DELAY_MS = 650;
 export const MAP_DEFAULT_ZOOM = 3;
 export const MAP_ROUTE_WEIGHT = 3;
 
-export const PDF_PAGE_MARGIN_PT = 36;
+/** Sample enroute weather every N nautical miles along each route leg. */
+export const ROUTE_SAMPLE_INTERVAL_NM = 40;
+export const ROUTE_SAMPLE_MIN_NM = 25;
+export const ROUTE_SAMPLE_MAX_NM = 50;
+
+export const BRIEFING_CACHE_TTL_MS = 90_000;
+export const UPSTREAM_CACHE_TTL_MS = 60_000;
+
+export const PDF_PAGE_MARGIN_PT = 28;
+
+export const DATA_SOURCE_FOOTER =
+  "Sources: NOAA AWC (METAR/TAF/SIGMET/fixes) · OurAirports · Open-Meteo (winds/cloud advisory) · RainViewer (radar)";

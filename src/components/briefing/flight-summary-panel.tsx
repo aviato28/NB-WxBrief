@@ -7,23 +7,32 @@ export function FlightSummaryPanel({
   summary,
   dataMode,
   routeRaw,
+  flightNumber,
+  aircraftRegistration,
 }: {
   readonly summary: FlightSummary;
   readonly dataMode: "mock" | "live";
   readonly routeRaw: string;
+  readonly flightNumber?: string | null;
+  readonly aircraftRegistration?: string | null;
 }) {
   return (
     <section className="efb-panel p-4 sm:p-5">
       <SectionHeader
         eyebrow="Flight summary"
-        title={`${summary.departure.icao} → ${summary.destination.icao}`}
+        title={`${flightNumber ? `${flightNumber} · ` : ""}${summary.departure.icao} → ${summary.destination.icao}`}
         actions={
           <Badge variant={dataMode === "live" ? "default" : "secondary"}>
             {dataMode === "live" ? "LIVE DATA" : "MOCK DATA"}
           </Badge>
         }
       />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <SummaryItem
+          label="Flight"
+          value={flightNumber ?? "—"}
+          hint={aircraftRegistration ?? "No registration"}
+        />
         <SummaryItem
           label="Departure"
           value={`${summary.departure.icao}${summary.departure.iata ? ` / ${summary.departure.iata}` : ""}`}
@@ -42,16 +51,18 @@ export function FlightSummaryPanel({
         <SummaryItem
           label="Cruise"
           value={formatFlightLevel(summary.flightLevel)}
-          hint={`${summary.routeDistanceNm.toLocaleString()} NM GC`}
+          hint={`${summary.routeDistanceNm.toLocaleString()} NM filed`}
+        />
+        <SummaryItem
+          label="Generated"
+          value={formatUtc(summary.generatedAt, "ddHH:mm")}
+          hint="UTC"
         />
       </div>
       <div className="mt-4 space-y-2">
         <p className="efb-label">ATC route</p>
         <p className="efb-mono rounded-md border border-border/70 bg-muted/50 p-3">
           {routeRaw}
-        </p>
-        <p className="text-[11px] text-muted-foreground">
-          Generated {formatUtc(summary.generatedAt, "yyyy-MM-dd HH:mm")}Z
         </p>
       </div>
     </section>
@@ -68,7 +79,7 @@ function SummaryItem({
   readonly hint: string;
 }) {
   return (
-    <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+    <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 transition hover:border-primary/30">
       <p className="efb-label">{label}</p>
       <p className="text-sm font-semibold tracking-wide">{value}</p>
       <p className="truncate text-xs text-muted-foreground">{hint}</p>

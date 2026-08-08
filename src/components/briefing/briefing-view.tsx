@@ -54,11 +54,14 @@ export function BriefingView({
   const briefing = query.data;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-in fade-in duration-300">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="efb-label">Operational briefing</p>
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+            {briefing.request.flightNumber
+              ? `${briefing.request.flightNumber} · `
+              : ""}
             {briefing.summary.departure.icao} → {briefing.summary.destination.icao}
           </h1>
         </div>
@@ -73,7 +76,23 @@ export function BriefingView({
         summary={briefing.summary}
         dataMode={briefing.dataMode}
         routeRaw={briefing.route.raw}
+        flightNumber={briefing.request.flightNumber}
+        aircraftRegistration={briefing.request.aircraftRegistration}
       />
+
+      <section className="efb-panel p-4 sm:p-5">
+        <SectionHeader eyebrow="Dispatch" title="Operational weather summary" />
+        <ul className="space-y-2 text-sm">
+          {briefing.enroute.dispatchBullets.map((bullet) => (
+            <li
+              key={bullet}
+              className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2"
+            >
+              • {bullet}
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <ThreatSummaryPanel threats={briefing.threats} />
 
@@ -96,12 +115,16 @@ export function BriefingView({
       ) : null}
 
       <section className="efb-panel p-4 sm:p-5">
-        <SectionHeader eyebrow="Enroute" title="Route map" />
+        <SectionHeader eyebrow="Enroute" title="Interactive weather map" />
         <RouteMapLazy
           departure={briefing.summary.departure}
           destination={briefing.summary.destination}
           alternate={briefing.summary.alternate}
-          routePoints={briefing.route.greatCirclePoints}
+          route={briefing.route}
+          enroute={briefing.enroute}
+          departureWeather={briefing.departureWeather}
+          destinationWeather={briefing.destinationWeather}
+          alternateWeather={briefing.alternateWeather}
         />
       </section>
 
