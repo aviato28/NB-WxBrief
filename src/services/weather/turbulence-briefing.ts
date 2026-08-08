@@ -21,11 +21,33 @@ import { formatFlightLevel } from "@/lib/format";
 
 function intensityFromShear(shear: number | null): TurbulenceIntensity {
   if (shear === null) return "NONE";
-  if (shear >= 6) return "SEVERE";
-  if (shear >= 3.5) return "MODERATE";
-  if (shear >= 2) return "LIGHT";
+  // Shear proxy is kt per ~1000 ft across neighboring pressure levels.
+  if (shear >= 5.5) return "SEVERE";
+  if (shear >= 3.0) return "MODERATE";
+  if (shear >= 1.5) return "LIGHT";
   return "NONE";
 }
+
+/** Jet-core wind speed is an additional CAT risk cue when shear is modest. */
+function intensityFromWind(windKt: number): TurbulenceIntensity {
+  if (windKt >= 120) return "MODERATE";
+  if (windKt >= 90) return "LIGHT";
+  return "NONE";
+}
+
+function worseIntensity(
+  a: TurbulenceIntensity,
+  b: TurbulenceIntensity,
+): TurbulenceIntensity {
+  const rank: Record<TurbulenceIntensity, number> = {
+    NONE: 0,
+    LIGHT: 1,
+    MODERATE: 2,
+    SEVERE: 3,
+  };
+  return rank[a] >= rank[b] ? a : b;
+}
+
 
 function causeFromContext(
   intensity: TurbulenceIntensity,
@@ -134,13 +156,25 @@ export function buildTurbulenceBriefing(input: {
           ? Math.max(...legWinds.map((w) => w.windSpeedKt))
           : 0;
 
-      let intensity = intensityFromShear(maxShear);
-      const sigmetHit = turbSigmets.length > 0 && intensity !== "NONE";
-      if (turbSigmets.length > 0 && maxWind >= 70) {
-        intensity = intensity === "NONE" ? "LIGHT" : intensity;
+      let intensity = worseIntensity(
+        intensityFromShear(maxShear),
+        intensityFromWind(maxWind),
+      );
+
+      // Route-corridor TURB SIGMET raises the floor — model shear alone under-calls CAT.
+      if (turbSigmets.length > 0) {
+        intensity = worseIntensity(intensity, "LIGHT");
+        if (maxWind >= 80 || (maxShear !== null && maxShear >= 2.5)) {
+          intensity = worseIntensity(intensity, "MODERATE");
+        }
       }
 
+      const sigmetHit = turbSigmets.length > 0 && intensity !== "NONE";
       const convectiveNearby = sigmets.some((s) => s.hazard === "CONVECTIVE");
+      if (convectiveNearby && intensity === "NONE" && maxWind >= 40) {
+        intensity = "LIGHT";
+      }
+
       const cause = causeFromContext(intensity, maxWind, convectiveNearby);
       const confidence = confidenceFrom(intensity, sigmetHit);
       const flBand = bandLabel(band, fl);
@@ -151,8 +185,14 @@ export function buildTurbulenceBriefing(input: {
           : cause === "CONVECTIVE"
             ? "Associated with convective activity near route."
             : cause === "CLEAR_AIR"
-              ? "Clear-air turbulence risk from vertical shear."
+              ? "Clear-air turbulence risk from vertical shear / jet."
               : "Cause indeterminate from available model fields.";
+      const dataNote =
+        maxShear === null && legWinds.length === 0
+          ? " Limited wind samples on this leg."
+          : maxShear === null
+            ? " Shear proxy unavailable; wind-speed cue used."
+            : "";
 
       assessments.push({
         segmentLabel: `${leg.from.name}–${leg.to.name}`,
@@ -170,7 +210,7 @@ export function buildTurbulenceBriefing(input: {
             ? ` ${formatFlightLevel(fl)}.`
             : ""
         }`,
-        notes: `${causeText} Confidence ${confidence}.`,
+        notes: `${causeText} Confidence ${confidence}.${dataNote} Advisory model product — verify with SIGMET/PIREPs.`,
       });
     }
   }

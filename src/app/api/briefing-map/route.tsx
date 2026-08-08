@@ -35,7 +35,7 @@ interface MapRequestBody {
 
 const WIDTH = 1600;
 const HEIGHT = 900;
-/** Light CARTO tiles — readable in print PDFs (dark_all reads as a black block). */
+/** Light CARTO tiles — readable in print PDFs. */
 const BASEMAP = "https://a.basemaps.cartocdn.com/light_all";
 
 function lon2x(lon: number, zoom: number): number {
@@ -63,19 +63,6 @@ function turbColor(intensity: string): string {
   }
 }
 
-function polyToPath(
-  points: readonly MapPoint[],
-  project: (lat: number, lon: number) => { x: number; y: number },
-): string {
-  return points
-    .map((p, i) => {
-      const xy = project(p.lat, p.lon);
-      return `${i === 0 ? "M" : "L"}${xy.x.toFixed(1)} ${xy.y.toFixed(1)}`;
-    })
-    .concat(["Z"])
-    .join(" ");
-}
-
 async function tileToDataUrl(url: string): Promise<string | null> {
   try {
     const res = await fetch(url, {
@@ -94,6 +81,39 @@ async function tileToDataUrl(url: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * Densify the filed path into screen-space dots.
+ * Satori mishandles CSS rotate/transformOrigin vs absolute HTML tiles, which
+ * previously drew the route south of the waypoint labels — no transforms here.
+ */
+function densifyRoutePixels(
+  path: readonly MapPoint[],
+  project: (lat: number, lon: number) => { x: number; y: number },
+  spacingPx = 5,
+): Array<{ key: string; x: number; y: number }> {
+  const dots: Array<{ key: string; x: number; y: number }> = [];
+  let n = 0;
+  for (let i = 0; i < path.length - 1; i += 1) {
+    const a = path[i];
+    const b = path[i + 1];
+    if (!a || !b) continue;
+    const p0 = project(a.lat, a.lon);
+    const p1 = project(b.lat, b.lon);
+    const dist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    const steps = Math.max(1, Math.ceil(dist / spacingPx));
+    for (let s = 0; s <= steps; s += 1) {
+      const t = s / steps;
+      dots.push({
+        key: `rp-${n}`,
+        x: p0.x + (p1.x - p0.x) * t,
+        y: p0.y + (p1.y - p0.y) * t,
+      });
+      n += 1;
+    }
+  }
+  return dots;
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
@@ -182,7 +202,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
-  // Cap tile count; prefer basemap over radar when trimming.
   const limited = specs
     .filter((t) => t.key.startsWith("b-"))
     .slice(0, 48)
@@ -191,25 +210,21 @@ export async function POST(request: NextRequest): Promise<Response> {
   const fetched = await Promise.all(
     limited.map(async (tile) => {
       const dataUrl = await tileToDataUrl(tile.url);
-      return dataUrl
-        ? { ...tile, dataUrl }
-        : null;
+      return dataUrl ? { ...tile, dataUrl } : null;
     }),
   );
   const tiles = fetched.filter(
     (t): t is TileSpec & { dataUrl: string } => t !== null,
   );
 
-  const routeD = path
-    .map((p, i) => {
-      const xy = project(p.lat, p.lon);
-      return `${i === 0 ? "M" : "L"}${xy.x.toFixed(1)} ${xy.y.toFixed(1)}`;
-    })
-    .join(" ");
-
   const fixes = body.fixes ?? [];
-  const sigmets = body.sigmets ?? [];
   const turbulence = body.turbulence ?? [];
+  const routeDots = densifyRoutePixels(path, project, 7);
+
+  // Endpoint fixes for stronger markers
+  const endpoints = new Set(
+    [fixes[0]?.name, fixes[fixes.length - 1]?.name].filter(Boolean),
+  );
 
   return new ImageResponse(
     (
@@ -219,7 +234,6 @@ export async function POST(request: NextRequest): Promise<Response> {
           height: HEIGHT,
           display: "flex",
           position: "relative",
-          // Light chart background — visible even if every tile fails
           backgroundColor: "#d9e6f2",
           overflow: "hidden",
         }}
@@ -242,69 +256,68 @@ export async function POST(request: NextRequest): Promise<Response> {
           />
         ))}
 
-        <svg
-          width={String(WIDTH)}
-          height={String(HEIGHT)}
-          style={{ position: "absolute", left: 0, top: 0 }}
-        >
-          {sigmets.map((sig, index) => (
-            <path
-              key={`sig-${index}`}
-              d={polyToPath(sig.points, project)}
-              fill={sig.hazard === "CONVECTIVE" ? "#f97316" : "#eab308"}
-              fillOpacity="0.22"
-              stroke={sig.hazard === "CONVECTIVE" ? "#ea580c" : "#ca8a04"}
-              strokeWidth="2"
+        {/* Route — densified dots (no CSS rotate; Satori misaligned transforms) */}
+        {routeDots.map((dot) => (
+          <div
+            key={`route-${dot.key}`}
+            style={{
+              position: "absolute",
+              left: dot.x - 4,
+              top: dot.y - 4,
+              width: 8,
+              height: 8,
+              borderRadius: 8,
+              backgroundColor: "#0b4f8a",
+              border: "2px solid #ffffff",
+              display: "flex",
+            }}
+          />
+        ))}
+
+        {/* Turbulence intensity dots (legend colors) */}
+        {turbulence.map((t, index) => {
+          const xy = project(t.lat, t.lon);
+          const size = t.intensity === "NONE" ? 10 : t.intensity === "LIGHT" ? 14 : 18;
+          return (
+            <div
+              key={`t-${index}`}
+              style={{
+                position: "absolute",
+                left: xy.x - size / 2,
+                top: xy.y - size / 2,
+                width: size,
+                height: size,
+                borderRadius: size,
+                backgroundColor: turbColor(t.intensity),
+                border: "2px solid #0b1524",
+                display: "flex",
+              }}
             />
-          ))}
+          );
+        })}
 
-          <path
-            d={routeD}
-            fill="none"
-            stroke="#ffffff"
-            strokeWidth="9"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          <path
-            d={routeD}
-            fill="none"
-            stroke="#0b4f8a"
-            strokeWidth="5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-
-          {turbulence.map((t, index) => {
-            const xy = project(t.lat, t.lon);
-            return (
-              <circle
-                key={`t-${index}`}
-                cx={xy.x}
-                cy={xy.y}
-                r={t.intensity === "NONE" ? 5 : 9}
-                fill={turbColor(t.intensity)}
-                stroke="#0b1524"
-                strokeWidth="1"
-              />
-            );
-          })}
-
-          {fixes.map((fix) => {
-            const xy = project(fix.lat, fix.lon);
-            return (
-              <circle
-                key={`dot-${fix.name}`}
-                cx={xy.x}
-                cy={xy.y}
-                r={6}
-                fill="#b45309"
-                stroke="#0b1524"
-                strokeWidth="1"
-              />
-            );
-          })}
-        </svg>
+        {/* Waypoint markers — cyan/amber, not turbulence colors */}
+        {fixes.map((fix) => {
+          const xy = project(fix.lat, fix.lon);
+          const isEnd = endpoints.has(fix.name);
+          const size = isEnd ? 14 : 10;
+          return (
+            <div
+              key={`dot-${fix.name}`}
+              style={{
+                position: "absolute",
+                left: xy.x - size / 2,
+                top: xy.y - size / 2,
+                width: size,
+                height: size,
+                borderRadius: isEnd ? 2 : size,
+                backgroundColor: isEnd ? "#b45309" : "#0ea5e9",
+                border: "2px solid #0b1524",
+                display: "flex",
+              }}
+            />
+          );
+        })}
 
         {fixes.map((fix) => {
           const xy = project(fix.lat, fix.lon);
@@ -314,7 +327,7 @@ export async function POST(request: NextRequest): Promise<Response> {
               style={{
                 position: "absolute",
                 left: xy.x + 10,
-                top: xy.y - 12,
+                top: xy.y - 14,
                 display: "flex",
                 color: "#0b1524",
                 fontSize: 18,
@@ -333,13 +346,19 @@ export async function POST(request: NextRequest): Promise<Response> {
             left: 16,
             bottom: 16,
             display: "flex",
-            backgroundColor: "rgba(255,255,255,0.88)",
+            flexDirection: "column",
+            backgroundColor: "rgba(255,255,255,0.92)",
             color: "#334155",
-            fontSize: 18,
+            fontSize: 16,
             padding: "10px 14px",
           }}
         >
-          NB-WxBrief · route chart · weather overlays
+          <div style={{ display: "flex" }}>
+            NB-WxBrief · CARTO basemap · filed route
+          </div>
+          <div style={{ display: "flex", marginTop: 4, fontSize: 14, color: "#64748b" }}>
+            Cyan/amber markers = waypoints · colored dots = turbulence
+          </div>
         </div>
       </div>
     ),

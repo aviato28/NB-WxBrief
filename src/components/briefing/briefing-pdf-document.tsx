@@ -948,10 +948,10 @@ export function BriefingPdfDocument({
             <View style={s.legendRow}>
               {(
                 [
-                  ["NONE", "Smooth"],
-                  ["LIGHT", "Light"],
-                  ["MODERATE", "Moderate"],
-                  ["SEVERE", "Severe"],
+                  ["NONE", "Smooth turb"],
+                  ["LIGHT", "Light turb"],
+                  ["MODERATE", "Moderate turb"],
+                  ["SEVERE", "Severe turb"],
                 ] as const
               ).map(([key, label]) => {
                 const tone = turbTone(key);
@@ -960,13 +960,30 @@ export function BriefingPdfDocument({
                     <View
                       style={[
                         s.legendDot,
-                        { backgroundColor: tone.fg, borderColor: tone.bd },
+                        {
+                          backgroundColor: tone.fg,
+                          borderColor: tone.bd,
+                          borderRadius: 3,
+                        },
                       ]}
                     />
                     <Text style={s.legendText}>{label}</Text>
                   </View>
                 );
               })}
+              <View style={s.legendItem}>
+                <View
+                  style={[
+                    s.legendDot,
+                    {
+                      backgroundColor: "#0ea5e9",
+                      borderColor: "#0b1524",
+                      borderRadius: 1,
+                    },
+                  ]}
+                />
+                <Text style={s.legendText}>Waypoint</Text>
+              </View>
             </View>
 
             {mapImageDataUrl ? (
@@ -976,7 +993,8 @@ export function BriefingPdfDocument({
                 <Image src={mapImageDataUrl} style={s.mapImage} />
                 <View style={s.mapFooter}>
                   <Text style={s.mapFooterText}>
-                    CARTO basemap · filed route · radar · SIGMET · turbulence
+                    CARTO basemap · filed route · cyan waypoints · turb dots by
+                    intensity (advisory)
                   </Text>
                   <Text style={s.mapFooterText}>
                     {Math.round(summary.routeDistanceNm).toLocaleString()} NM ·{" "}

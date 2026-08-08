@@ -4,6 +4,7 @@ import {
   flightLevelToPressureHpa,
   neighboringPressureLevels,
   toOpenMeteoHour,
+  verticalShearKtPer1000Ft,
 } from "@/lib/aviation-geo";
 import { fetchJsonSoft } from "@/lib/http";
 import type {
@@ -22,9 +23,9 @@ interface OpenMeteoHourlyResponse {
 
 function shearToIntensity(shear: number | null): TurbulenceIntensity {
   if (shear === null) return "NONE";
-  if (shear >= 6) return "SEVERE";
-  if (shear >= 3.5) return "MODERATE";
-  if (shear >= 2) return "LIGHT";
+  if (shear >= 5.5) return "SEVERE";
+  if (shear >= 3.0) return "MODERATE";
+  if (shear >= 1.5) return "LIGHT";
   return "NONE";
 }
 
@@ -230,8 +231,14 @@ export class OpenMeteoWindsClient {
         payload.hourly?.[`wind_speed_${upper}hPa`]?.[hourIndex] ?? NaN,
       );
       if (Number.isFinite(lowerSpeed) && Number.isFinite(upperSpeed)) {
-        const deltaFl = Math.max(1, Math.abs(upper - lower) / 3.4);
-        shear = Math.abs(upperSpeed - lowerSpeed) / deltaFl;
+        // Previous /3.4 hPa heuristic overstated layer thickness (~3–4×) and
+        // systematically under-called CAT. Use approx FL thickness instead.
+        shear = verticalShearKtPer1000Ft(
+          lower,
+          upper,
+          lowerSpeed,
+          upperSpeed,
+        );
       }
     }
 
