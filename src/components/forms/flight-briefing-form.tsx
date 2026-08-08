@@ -18,7 +18,9 @@ import {
   type FlightBriefingRequestParsed,
 } from "@/domain/schemas/flight-request";
 import {
+  defaultDepartureTimeUtc,
   flightRequestToSearchParams,
+  toDatetimeLocalValue,
   toFlightRequest,
 } from "@/lib/flight-request";
 
@@ -27,6 +29,7 @@ const DEFAULT_VALUES: FlightBriefingFormValues = {
   destinationIcao: "EGLL",
   alternateIcao: "EIDW",
   flightLevel: 350,
+  departureTimeUtc: toDatetimeLocalValue(defaultDepartureTimeUtc()),
   flightNumber: "NB101",
   aircraftRegistration: "N101NB",
   atcRoute:
@@ -120,7 +123,7 @@ export function FlightBriefingForm() {
 
         <Field
           id="flightLevel"
-          label={`Flight level (${MIN_FLIGHT_LEVEL}–${MAX_FLIGHT_LEVEL}, step ${FLIGHT_LEVEL_STEP})`}
+          label={`Cruise FL (${MIN_FLIGHT_LEVEL}–${MAX_FLIGHT_LEVEL}) · turb ±4000 ft`}
           error={form.formState.errors.flightLevel?.message}
         >
           <Input
@@ -133,6 +136,20 @@ export function FlightBriefingForm() {
             className="font-mono"
             aria-invalid={Boolean(form.formState.errors.flightLevel)}
             {...form.register("flightLevel")}
+          />
+        </Field>
+
+        <Field
+          id="departureTimeUtc"
+          label="Departure time (UTC)"
+          error={form.formState.errors.departureTimeUtc?.message}
+        >
+          <Input
+            id="departureTimeUtc"
+            type="datetime-local"
+            className="font-mono"
+            aria-invalid={Boolean(form.formState.errors.departureTimeUtc)}
+            {...form.register("departureTimeUtc")}
           />
         </Field>
 
@@ -170,8 +187,8 @@ export function FlightBriefingForm() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-muted-foreground">
-          Generates METAR, TAF, SIGMETs, winds aloft, and a threat summary for
-          the filed route.
+          Winds and turbulence are timed from your ETD and assessed at cruise
+          FL ±4000 ft.
         </p>
         <Button
           type="submit"

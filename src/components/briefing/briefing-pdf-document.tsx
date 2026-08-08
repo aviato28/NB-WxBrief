@@ -1,6 +1,7 @@
 import React from "react";
 import {
   Document,
+  Image,
   Page,
   StyleSheet,
   Text,
@@ -336,6 +337,30 @@ const s = StyleSheet.create({
     fontSize: 6.5,
     color: mute,
     marginTop: 1,
+  },
+  mapShell: {
+    borderWidth: 1,
+    borderColor: "#64748b",
+    marginBottom: 4,
+    backgroundColor: "#d9e6f2",
+  },
+  mapImage: {
+    width: "100%",
+    height: 300,
+    objectFit: "cover",
+  },
+  mapFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    backgroundColor: soft,
+    borderTopWidth: 1,
+    borderTopColor: line,
+    paddingVertical: 4,
+    paddingHorizontal: 7,
+  },
+  mapFooterText: {
+    fontSize: 6,
+    color: mute,
   },
   airportCard: {
     borderWidth: 1,
@@ -705,14 +730,20 @@ function Footer({ generatedAt }: { readonly generatedAt: string }) {
 
 export function BriefingPdfDocument({
   briefing,
+  mapImageDataUrl,
 }: {
   readonly briefing: WeatherBriefing;
   readonly mapImageDataUrl?: string | null;
 }) {
   const { summary, request, enroute } = briefing;
 
+  const cruiseTurb = enroute.turbulence.filter(
+    (t) => t.altitudeBand === "cruise",
+  );
   const maxTurb = maxOf(
-    enroute.turbulence.map((t) => t.intensity),
+    (cruiseTurb.length > 0 ? cruiseTurb : enroute.turbulence).map(
+      (t) => t.intensity,
+    ),
     TURB_RANK,
     "NONE",
   );
@@ -747,8 +778,16 @@ export function BriefingPdfDocument({
     enroute.waypointConditions.map((c) => [c.fixName, c] as const),
   );
   const turbFrom = new Map(
-    enroute.turbulence.map((t) => [t.fromFix, t] as const),
+    cruiseTurb.map((t) => [t.fromFix, t] as const),
   );
+  const turbSegments = Array.from(
+    new Map(enroute.turbulence.map((t) => [t.segmentLabel, true] as const)).keys(),
+  );
+  const cruiseWinds = enroute.windsAloft.filter(
+    (w) => w.flightLevel === summary.flightLevel,
+  );
+  const windsForTable =
+    cruiseWinds.length > 0 ? cruiseWinds : enroute.windsAloft;
 
   return (
     <Document
@@ -770,13 +809,10 @@ export function BriefingPdfDocument({
               [
                 ["Flight", request.flightNumber ?? "—"],
                 ["Aircraft", request.aircraftRegistration ?? "—"],
+                ["ETD UTC", formatUtc(summary.departureTimeUtc, "ddHH:mm")],
                 ["Level", formatFlightLevel(summary.flightLevel)],
                 ["Departure", summary.departure.icao],
                 ["Destination", summary.destination.icao],
-                [
-                  "Distance",
-                  `${Math.round(summary.routeDistanceNm).toLocaleString()} NM`,
-                ],
               ] as const
             ).map(([label, value]) => (
               <View key={label} style={s.mastCell}>
@@ -801,7 +837,7 @@ export function BriefingPdfDocument({
                     label: "Expected ride",
                     value: TURBULENCE_LABELS[maxTurb],
                     hint:
-                      enroute.turbulence.find((t) => t.intensity === maxTurb)
+                      cruiseTurb.find((t) => t.intensity === maxTurb)
                         ?.segmentLabel ?? "Route",
                     tone: ride,
                     last: false,
@@ -810,7 +846,7 @@ export function BriefingPdfDocument({
                     label: "Max turbulence",
                     value: TURBULENCE_LABELS[maxTurb],
                     hint:
-                      enroute.turbulence.find((t) => t.intensity === maxTurb)
+                      cruiseTurb.find((t) => t.intensity === maxTurb)
                         ?.flightLevelBand ??
                       formatFlightLevel(summary.flightLevel),
                     tone: ride,
@@ -907,7 +943,7 @@ export function BriefingPdfDocument({
           <View style={s.section}>
             <Section
               title="5. Route weather map"
-              hint="Print-safe route chart with weather overlays"
+              hint="Basemap + filed route · weather overlays"
             />
             <View style={s.legendRow}>
               {(
@@ -933,7 +969,24 @@ export function BriefingPdfDocument({
               })}
             </View>
 
-            <PdfVectorMap briefing={briefing} />
+            {mapImageDataUrl ? (
+              <View style={s.mapShell} wrap={false}>
+                {/* react-pdf Image — not a DOM <img>; a11y rule does not apply */}
+                {/* eslint-disable-next-line jsx-a11y/alt-text */}
+                <Image src={mapImageDataUrl} style={s.mapImage} />
+                <View style={s.mapFooter}>
+                  <Text style={s.mapFooterText}>
+                    CARTO basemap · filed route · radar · SIGMET · turbulence
+                  </Text>
+                  <Text style={s.mapFooterText}>
+                    {Math.round(summary.routeDistanceNm).toLocaleString()} NM ·{" "}
+                    {briefing.route.fixes.length} waypoints
+                  </Text>
+                </View>
+              </View>
+            ) : (
+              <PdfVectorMap briefing={briefing} />
+            )}
           </View>
         </View>
 
@@ -1086,9 +1139,9 @@ export function BriefingPdfDocument({
               <Text style={[s.th, { width: "13%" }]}>Cloud</Text>
               <Text style={[s.th, { width: "13%" }]}>Shear</Text>
             </View>
-            {enroute.windsAloft.slice(0, 14).map((sample, index) => (
+            {windsForTable.slice(0, 14).map((sample, index) => (
               <View
-                key={`${sample.label}-${index}`}
+                key={`${sample.label}-${sample.flightLevel}-${index}`}
                 style={[
                   s.tr,
                   { backgroundColor: index % 2 ? softAlt : white },
@@ -1118,42 +1171,44 @@ export function BriefingPdfDocument({
             ))}
           </View>
 
-          <Section title="7. Turbulence briefing" />
-          {enroute.turbulence.map((turb) => {
-            const tone = turbTone(turb.intensity);
+          <Section title="7. Turbulence briefing" hint="Cruise ±4000 ft" />
+          {turbSegments.map((segment) => {
+            const items = enroute.turbulence.filter(
+              (t) => t.segmentLabel === segment,
+            );
             return (
-              <View key={turb.segmentLabel} style={s.turbCard} wrap={false}>
-                <View style={s.turbTop}>
-                  <Text style={s.turbSeg}>{turb.segmentLabel}</Text>
-                  <Badge
-                    label={TURBULENCE_LABELS[turb.intensity].toUpperCase()}
-                    fg={tone.fg}
-                    bg={tone.bg}
-                    bd={tone.bd}
-                  />
-                </View>
-                <Text style={{ fontSize: 8.5, color: ink }}>
-                  {shortLine(turb.pilotText)}
-                </Text>
-                <View style={s.metaRow}>
-                  <Text style={s.metaItem}>
-                    FL <Text style={s.metaStrong}>{turb.flightLevelBand}</Text>
-                  </Text>
-                  <Text style={s.metaItem}>
-                    Duration{" "}
-                    <Text style={s.metaStrong}>{turb.expectedDuration}</Text>
-                  </Text>
-                  <Text style={s.metaItem}>
-                    Cause{" "}
-                    <Text style={s.metaStrong}>
-                      {turb.likelyCause.split("_").join(" ")}
-                    </Text>
-                  </Text>
-                  <Text style={s.metaItem}>
-                    Confidence{" "}
-                    <Text style={s.metaStrong}>{turb.confidence}</Text>
-                  </Text>
-                </View>
+              <View key={segment} style={s.turbCard} wrap={false}>
+                <Text style={[s.turbSeg, { marginBottom: 4 }]}>{segment}</Text>
+                {(["below", "cruise", "above"] as const).map((band) => {
+                  const turb = items.find((t) => t.altitudeBand === band);
+                  if (!turb) return null;
+                  const tone = turbTone(turb.intensity);
+                  return (
+                    <View
+                      key={`${segment}-${band}`}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        marginBottom: 3,
+                      }}
+                    >
+                      <Text style={[s.tdMute, { width: "34%" }]}>
+                        {turb.flightLevelBand}
+                      </Text>
+                      <View style={{ width: "18%" }}>
+                        <Badge
+                          label={TURBULENCE_LABELS[turb.intensity].toUpperCase()}
+                          fg={tone.fg}
+                          bg={tone.bg}
+                          bd={tone.bd}
+                        />
+                      </View>
+                      <Text style={[s.td, { width: "48%" }]}>
+                        {shortLine(turb.pilotText)}
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
             );
           })}

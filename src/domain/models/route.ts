@@ -53,6 +53,8 @@ export interface FlightRequest {
   readonly alternateIcao: IcaoCode | null;
   readonly atcRoute: string;
   readonly flightLevel: FlightLevel;
+  /** Planned departure time as ISO-8601 UTC (e.g. 2026-08-08T18:30:00.000Z). */
+  readonly departureTimeUtc: string;
   readonly flightNumber: string | null;
   readonly aircraftRegistration: string | null;
 }

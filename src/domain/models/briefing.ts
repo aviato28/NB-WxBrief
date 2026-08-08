@@ -11,6 +11,7 @@ export interface FlightSummary {
   readonly destination: Airport;
   readonly alternate: Airport | null;
   readonly flightLevel: number;
+  readonly departureTimeUtc: string;
   readonly routeDistanceNm: number;
   readonly estimatedAirway: string;
   readonly generatedAt: string;

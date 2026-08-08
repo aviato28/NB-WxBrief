@@ -6,7 +6,15 @@ import type {
   Sigmet,
 } from "@/domain/models/weather";
 import type { ParsedRoute } from "@/domain/models/route";
-import { routeIntersectsSigmet } from "@/lib/aviation-geo";
+import {
+  BRIEFING_ASSUMED_GROUNDSPEED_KT,
+  TURBULENCE_ALTITUDE_OFFSET_FL,
+} from "@/domain/constants/app";
+import {
+  MAX_FLIGHT_LEVEL,
+  MIN_FLIGHT_LEVEL,
+} from "@/domain/schemas/flight-request";
+import { cruiseAltitudeBands, routeIntersectsSigmet } from "@/lib/aviation-geo";
 import { fetchJson, fetchJsonSoft } from "@/lib/http";
 import {
   buildAirportWeatherBundle,
@@ -108,18 +116,45 @@ export class AwcWeatherProvider implements WeatherProvider {
       ...(query.route?.pathPoints ?? query.routePoints ?? []),
     ];
 
+    const bands = cruiseAltitudeBands(
+      query.flightLevel,
+      TURBULENCE_ALTITUDE_OFFSET_FL,
+      MIN_FLIGHT_LEVEL,
+      MAX_FLIGHT_LEVEL,
+    );
+    const flightLevels = [bands.below, bands.cruise, bands.above];
+
+    const windowStart = Date.parse(query.departureTimeUtc);
+    const etaMs =
+      windowStart +
+      (query.route
+        ? (query.route.totalDistanceNm / BRIEFING_ASSUMED_GROUNDSPEED_KT) *
+          3_600_000
+        : 8 * 3_600_000);
+    const windowEnd = Number.isFinite(etaMs)
+      ? etaMs
+      : windowStart + 8 * 3_600_000;
+
     const [allSigmets, windsResult] = await Promise.all([
       this.getSigmets(null),
       query.route && query.route.samples.length > 0
         ? this.windsClient
-            .sampleAlongRoute(query.route.samples, query.flightLevel)
+            .sampleAlongRoute(
+              query.route.samples,
+              flightLevels,
+              query.departureTimeUtc,
+            )
             .catch((error: unknown) => {
               console.warn("[open-meteo-winds] soft-fail:", error);
               return { windsAloft: [], shearBySampleId: new Map() };
             })
         : routePoints.length > 0
           ? this.windsClient
-              .sampleRouteWinds(routePoints, query.flightLevel)
+              .sampleRouteWinds(
+                routePoints,
+                query.flightLevel,
+                query.departureTimeUtc,
+              )
               .then((r) => ({
                 windsAloft: r.windsAloft.map((w) => ({
                   ...w,
@@ -140,11 +175,18 @@ export class AwcWeatherProvider implements WeatherProvider {
     const winds = windsResult.windsAloft;
 
     const sigmets = allSigmets
-      .filter((sigmet) =>
-        sigmet.polygon
-          ? routeIntersectsSigmet(routePoints, sigmet.polygon, 150)
-          : false,
-      )
+      .filter((sigmet) => {
+        if (!sigmet.polygon) return false;
+        if (!routeIntersectsSigmet(routePoints, sigmet.polygon, 150)) {
+          return false;
+        }
+        const from = Date.parse(sigmet.validFrom);
+        const to = Date.parse(sigmet.validTo);
+        if (Number.isNaN(from) || Number.isNaN(to) || Number.isNaN(windowStart)) {
+          return true;
+        }
+        return from <= windowEnd && to >= windowStart;
+      })
       .slice(0, 20);
 
     const convective: ConvectiveAssessment[] = [];
@@ -153,14 +195,14 @@ export class AwcWeatherProvider implements WeatherProvider {
       convective.push({
         segmentLabel: "Route corridor",
         risk: convectiveSigmets.length >= 3 ? "SCATTERED" : "ISOLATED",
-        notes: `${convectiveSigmets.length} convective SIGMET(s) intersect or are near the filed route corridor.`,
+        notes: `${convectiveSigmets.length} convective SIGMET(s) intersect or are near the filed route corridor for the planned departure window.`,
       });
     } else {
       convective.push({
         segmentLabel: "Route corridor",
         risk: "NONE",
         notes:
-          "No convective SIGMETs currently intersecting the filed route corridor.",
+          "No convective SIGMETs intersecting the filed route corridor for the planned departure window.",
       });
     }
 
@@ -185,7 +227,8 @@ export class AwcWeatherProvider implements WeatherProvider {
     });
 
     const alongRouteNotes = [
-      `Winds/cloud sampled via Open-Meteo along the filed waypoint route at FL${query.flightLevel} (advisory).`,
+      `Winds/turbulence timed from ETD ${query.departureTimeUtc.slice(0, 16).replace("T", " ")}Z along the filed route.`,
+      `Sampled FL${bands.below} (−4000 ft), FL${bands.cruise} (cruise), and FL${bands.above} (+4000 ft) via Open-Meteo (advisory).`,
       `Route distance ${Math.round(route.totalDistanceNm).toLocaleString()} NM across ${route.legs.length} leg(s).`,
     ];
 
@@ -200,11 +243,12 @@ export class AwcWeatherProvider implements WeatherProvider {
         "Winds aloft samples unavailable; verify with official FD / company winds.",
       );
     } else {
-      const maxWind = Math.max(...winds.map((sample) => sample.windSpeedKt));
-      alongRouteNotes.push(`Peak sampled wind along route ≈ ${maxWind} kt.`);
+      const cruiseWinds = winds.filter((w) => w.flightLevel === bands.cruise);
+      const pool = cruiseWinds.length > 0 ? cruiseWinds : winds;
+      const maxWind = Math.max(...pool.map((sample) => sample.windSpeedKt));
+      alongRouteNotes.push(`Peak sampled wind @ cruise ≈ ${maxWind} kt.`);
     }
 
-    // Placeholder terminal weather for dispatch bullets — filled by BriefingService.
     const stubWx = {
       icao: query.departureIcao as AirportWeather["icao"],
       metar: null,
@@ -218,6 +262,7 @@ export class AwcWeatherProvider implements WeatherProvider {
       winds,
       turbulence,
       sigmets,
+      cruiseFlightLevel: bands.cruise,
     });
 
     const dispatchBullets = buildDispatchBullets({
@@ -243,11 +288,13 @@ export class AwcWeatherProvider implements WeatherProvider {
                 segmentLabel: "Route corridor",
                 fromFix: query.departureIcao,
                 toFix: query.destinationIcao,
-                intensity: "NONE",
-                flightLevelBand: `FL${query.flightLevel}`,
+                intensity: "NONE" as const,
+                flightLevel: bands.cruise,
+                altitudeBand: "cruise" as const,
+                flightLevelBand: `FL${bands.cruise} (cruise)`,
                 expectedDuration: "Entire route",
-                likelyCause: "UNKNOWN",
-                confidence: "LOW",
+                likelyCause: "UNKNOWN" as const,
+                confidence: "LOW" as const,
                 pilotText: "Route corridor\nSmooth.",
                 notes: "No significant model shear detected at sampled points.",
               },

@@ -20,13 +20,31 @@ export function BriefingToolbar({
   async function handleExport(): Promise<void> {
     setExporting(true);
     try {
-      const [{ pdf }, { BriefingPdfDocument }] = await Promise.all([
-        import("@react-pdf/renderer"),
-        import("@/components/briefing/briefing-pdf-document"),
-      ]);
+      const [{ pdf }, { BriefingPdfDocument }, { captureBriefingMapImage }] =
+        await Promise.all([
+          import("@react-pdf/renderer"),
+          import("@/components/briefing/briefing-pdf-document"),
+          import("@/lib/pdf-map-capture"),
+        ]);
+
+      // Prefer server tile mosaic (real basemap); vector chart is the PDF fallback.
+      let mapImageDataUrl: string | null = null;
+      try {
+        mapImageDataUrl = await Promise.race([
+          captureBriefingMapImage(briefing),
+          new Promise<null>((resolve) => {
+            window.setTimeout(() => resolve(null), 12_000);
+          }),
+        ]);
+      } catch (error) {
+        console.warn("[pdf-export] map capture skipped:", error);
+      }
 
       const blob = await pdf(
-        <BriefingPdfDocument briefing={briefing} />,
+        <BriefingPdfDocument
+          briefing={briefing}
+          mapImageDataUrl={mapImageDataUrl}
+        />,
       ).toBlob();
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
