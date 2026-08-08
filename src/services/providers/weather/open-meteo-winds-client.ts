@@ -3,7 +3,7 @@ import {
   flightLevelToPressureHpa,
   neighboringPressureLevels,
 } from "@/lib/aviation-geo";
-import { fetchJson } from "@/lib/http";
+import { fetchJsonSoft } from "@/lib/http";
 import type {
   TurbulenceAssessment,
   TurbulenceIntensity,
@@ -78,10 +78,14 @@ export class OpenMeteoWindsClient {
           `&hourly=${hourlyVars}` +
           `&wind_speed_unit=kn&forecast_hours=1&timezone=UTC`;
 
-        const payload = await fetchJson<OpenMeteoHourlyResponse>({
+        const payload = await fetchJsonSoft<OpenMeteoHourlyResponse>({
           provider: this.id,
           url,
         });
+
+        if (!payload) {
+          return;
+        }
 
         const speedKey = `wind_speed_${hpa}hPa`;
         const dirKey = `wind_direction_${hpa}hPa`;

@@ -97,10 +97,16 @@ function threatsFromSigmets(sigmets: readonly Sigmet[]): ThreatItem[] {
       severity = "CAUTION";
     }
 
+    // Prefer a distinct title from the mapped summary (includes series / altitudes).
+    const seriesMatch = /^(\S+(?:\s+\S+)?)\s+(\S+)/.exec(sigmet.summary);
+    const title = seriesMatch
+      ? `SIGMET ${seriesMatch[1]} ${seriesMatch[2]}`
+      : `SIGMET ${sigmet.hazard}`;
+
     return {
       id: `sigmet-${sigmet.id}`,
       severity,
-      title: `SIGMET ${sigmet.hazard}`,
+      title,
       detail: sigmet.summary,
       relatedIcao: null,
     };

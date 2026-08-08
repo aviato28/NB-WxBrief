@@ -7,7 +7,7 @@ import type {
 } from "@/domain/models/weather";
 import { routeIntersectsSigmet } from "@/lib/aviation-geo";
 import { interpolateGreatCircle } from "@/lib/geo";
-import { fetchJson } from "@/lib/http";
+import { fetchJson, fetchJsonSoft } from "@/lib/http";
 import {
   buildAirportWeatherBundle,
   mapAwcMetar,
@@ -33,6 +33,7 @@ const AWC_BASE = "https://aviationweather.gov/api/data";
  * - Open-Meteo for winds-aloft advisory samples along the route
  *
  * Must run server-side — AWC does not allow browser CORS.
+ * Non-critical upstream failures degrade the briefing instead of aborting it.
  */
 export class AwcWeatherProvider implements WeatherProvider {
   readonly id = "awc+open-meteo";
@@ -44,7 +45,8 @@ export class AwcWeatherProvider implements WeatherProvider {
 
   async getAirportWeather(icaoCode: string): Promise<AirportWeather | null> {
     const icao = icaoCode.trim().toUpperCase();
-    const [metarPayload, tafPayload] = await Promise.all([
+
+    const [metarResult, tafResult] = await Promise.allSettled([
       fetchJson<AwcMetarJson[]>({
         provider: "awc-metar",
         url: `${AWC_BASE}/metar?ids=${encodeURIComponent(icao)}&format=json`,
@@ -54,6 +56,17 @@ export class AwcWeatherProvider implements WeatherProvider {
         url: `${AWC_BASE}/taf?ids=${encodeURIComponent(icao)}&format=json`,
       }),
     ]);
+
+    const metarPayload =
+      metarResult.status === "fulfilled" ? metarResult.value : null;
+    const tafPayload = tafResult.status === "fulfilled" ? tafResult.value : null;
+
+    if (metarResult.status === "rejected") {
+      console.warn(`[awc-metar] ${icao}:`, metarResult.reason);
+    }
+    if (tafResult.status === "rejected") {
+      console.warn(`[awc-taf] ${icao}:`, tafResult.reason);
+    }
 
     const metarRaw = metarPayload?.[0] ?? null;
     const tafRaw = tafPayload?.[0] ?? null;
@@ -73,11 +86,11 @@ export class AwcWeatherProvider implements WeatherProvider {
   async getSigmets(bounds: GeoBounds | null): Promise<readonly Sigmet[]> {
     void bounds;
     const [intl, us] = await Promise.all([
-      fetchJson<AwcSigmetJson[]>({
+      fetchJsonSoft<AwcSigmetJson[]>({
         provider: "awc-isigmet",
         url: `${AWC_BASE}/isigmet?format=json`,
       }),
-      fetchJson<AwcSigmetJson[]>({
+      fetchJsonSoft<AwcSigmetJson[]>({
         provider: "awc-airsigmet",
         url: `${AWC_BASE}/airsigmet?format=json`,
       }),
@@ -104,12 +117,19 @@ export class AwcWeatherProvider implements WeatherProvider {
           )
         : [];
 
-    const [allSigmets, winds] = await Promise.all([
+    const [allSigmets, windsResult] = await Promise.all([
       this.getSigmets(null),
       routePoints.length > 0
-        ? this.windsClient.sampleRouteWinds(routePoints, query.flightLevel)
+        ? this.windsClient
+            .sampleRouteWinds(routePoints, query.flightLevel)
+            .catch((error: unknown) => {
+              console.warn("[open-meteo-winds] soft-fail:", error);
+              return { windsAloft: [], turbulence: [] };
+            })
         : Promise.resolve({ windsAloft: [], turbulence: [] }),
     ]);
+
+    const winds = windsResult;
 
     // Only keep SIGMETs that geometrically intersect the route corridor.
     // Do NOT fall back to unrelated global products — that creates false threats.
@@ -133,7 +153,8 @@ export class AwcWeatherProvider implements WeatherProvider {
       convective.push({
         segmentLabel: "Route corridor",
         risk: "NONE",
-        notes: "No convective SIGMETs currently intersecting the sampled route corridor.",
+        notes:
+          "No convective SIGMETs currently intersecting the sampled route corridor.",
       });
     }
 
@@ -142,8 +163,20 @@ export class AwcWeatherProvider implements WeatherProvider {
       `SIGMET filter applied against great-circle route ${query.departureIcao}–${query.destinationIcao}. ATC route string is retained for briefing context: ${query.routeText.slice(0, 120)}${query.routeText.length > 120 ? "…" : ""}`,
     ];
 
-    if (winds.windsAloft[0]) {
-      const maxWind = Math.max(...winds.windsAloft.map((sample) => sample.windSpeedKt));
+    if (allSigmets.length === 0) {
+      alongRouteNotes.push(
+        "SIGMET feed was empty or temporarily unavailable; treat enroute SIGMET coverage as incomplete.",
+      );
+    }
+
+    if (winds.windsAloft.length === 0) {
+      alongRouteNotes.push(
+        "Winds aloft samples unavailable for this request; verify with official FD / company winds.",
+      );
+    } else {
+      const maxWind = Math.max(
+        ...winds.windsAloft.map((sample) => sample.windSpeedKt),
+      );
       alongRouteNotes.push(`Peak sampled wind along route ≈ ${maxWind} kt.`);
     }
 
