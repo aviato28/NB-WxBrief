@@ -11,6 +11,8 @@ export interface EnrouteWeatherQuery {
   readonly departureIcao: IcaoCode | string;
   readonly destinationIcao: IcaoCode | string;
   readonly flightLevel: number;
+  /** Planned departure (ISO UTC) — drives winds/turbulence valid time. */
+  readonly departureTimeUtc: string;
   readonly routeText: string;
   /** Preferred: fully resolved filed route. */
   readonly route?: ParsedRoute;

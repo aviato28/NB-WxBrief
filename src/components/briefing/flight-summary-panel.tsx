@@ -27,7 +27,7 @@ export function FlightSummaryPanel({
           </Badge>
         }
       />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-7">
         <SummaryItem
           label="Flight"
           value={flightNumber ?? "—"}
@@ -49,9 +49,14 @@ export function FlightSummaryPanel({
           hint={summary.alternate?.name ?? "Not filed"}
         />
         <SummaryItem
+          label="ETD (UTC)"
+          value={formatUtc(summary.departureTimeUtc, "ddHH:mm")}
+          hint={formatUtc(summary.departureTimeUtc, "yyyy-MM-dd")}
+        />
+        <SummaryItem
           label="Cruise"
           value={formatFlightLevel(summary.flightLevel)}
-          hint={`${summary.routeDistanceNm.toLocaleString()} NM filed`}
+          hint={`${summary.routeDistanceNm.toLocaleString()} NM · ±4000 ft turb`}
         />
         <SummaryItem
           label="Generated"

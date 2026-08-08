@@ -34,6 +34,7 @@ export class MockWeatherProvider implements WeatherProvider {
     void query.departureIcao;
     void query.destinationIcao;
     void query.routeText;
+    void query.departureTimeUtc;
     return buildMockEnrouteWeather(query.flightLevel);
   }
 

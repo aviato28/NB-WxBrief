@@ -35,6 +35,27 @@ export const MIN_FLIGHT_LEVEL = 180;
 export const MAX_FLIGHT_LEVEL = 450;
 export const FLIGHT_LEVEL_STEP = 10;
 
+/**
+ * Accepts datetime-local (`YYYY-MM-DDTHH:mm`) or full ISO; normalizes to UTC ISO.
+ * Form values are treated as UTC (field is labeled Departure time UTC).
+ */
+export const departureTimeUtcSchema = z
+  .string()
+  .trim()
+  .min(1, "Enter planned departure time (UTC)")
+  .transform((value) => {
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+      return `${value}:00.000Z`;
+    }
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value)) {
+      return value.endsWith("Z") ? value : `${value}Z`;
+    }
+    return value;
+  })
+  .refine((value) => !Number.isNaN(Date.parse(value)), {
+    message: "Enter a valid departure date/time",
+  });
+
 export const flightBriefingRequestSchema = z
   .object({
     departureIcao: icaoSchema,
@@ -53,6 +74,7 @@ export const flightBriefingRequestSchema = z
       .refine((value) => value % FLIGHT_LEVEL_STEP === 0, {
         message: `Flight level must be in increments of ${FLIGHT_LEVEL_STEP}`,
       }),
+    departureTimeUtc: departureTimeUtcSchema,
     flightNumber: optionalText,
     aircraftRegistration: optionalText,
   })

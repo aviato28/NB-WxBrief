@@ -122,11 +122,17 @@ export type TurbulenceCause =
   | "CLEAR_AIR"
   | "UNKNOWN";
 
+export type TurbulenceAltitudeBand = "below" | "cruise" | "above";
+
 export interface TurbulenceAssessment {
   readonly segmentLabel: string;
   readonly fromFix: string;
   readonly toFix: string;
   readonly intensity: TurbulenceIntensity;
+  /** Absolute FL for this assessment (cruise, cruise−40, or cruise+40). */
+  readonly flightLevel: number;
+  /** Relative to the filed cruise level. */
+  readonly altitudeBand: TurbulenceAltitudeBand;
   readonly flightLevelBand: string;
   readonly expectedDuration: string;
   readonly likelyCause: TurbulenceCause;

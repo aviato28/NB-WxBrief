@@ -6,7 +6,7 @@ import {
   TURBULENCE_LABELS,
   TURBULENCE_STYLES,
 } from "@/domain/constants/weather-styles";
-import { formatUtc } from "@/lib/format";
+import { formatFlightLevel, formatUtc } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export function EnrouteSection({
@@ -14,6 +14,21 @@ export function EnrouteSection({
 }: {
   readonly enroute: EnrouteWeather;
 }) {
+  const cruiseFl =
+    enroute.turbulence.find((t) => t.altitudeBand === "cruise")?.flightLevel ??
+    enroute.windsAloft.find(() => true)?.flightLevel;
+
+  const cruiseWinds = cruiseFl
+    ? enroute.windsAloft.filter((w) => w.flightLevel === cruiseFl)
+    : enroute.windsAloft;
+
+  // Group turbulence by segment for a compact ±4000 ft comparison.
+  const segments = Array.from(
+    new Map(
+      enroute.turbulence.map((t) => [t.segmentLabel, t.segmentLabel] as const),
+    ).keys(),
+  );
+
   return (
     <section className="efb-panel space-y-6 p-4 sm:p-5">
       <SectionHeader eyebrow="Enroute" title="Route weather" />
@@ -47,8 +62,11 @@ export function EnrouteSection({
       </div>
 
       <div>
-        <h3 className="efb-label mb-2">Winds aloft</h3>
-        {enroute.windsAloft.length === 0 ? (
+        <h3 className="efb-label mb-2">
+          Winds aloft
+          {cruiseFl ? ` · ${formatFlightLevel(cruiseFl)} cruise` : ""}
+        </h3>
+        {cruiseWinds.length === 0 ? (
           <p className="text-sm text-muted-foreground">No winds samples.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -64,9 +82,9 @@ export function EnrouteSection({
                 </tr>
               </thead>
               <tbody>
-                {enroute.windsAloft.map((sample) => (
+                {cruiseWinds.map((sample) => (
                   <tr
-                    key={`${sample.label}-${sample.point.latitude}-${sample.point.longitude}`}
+                    key={`${sample.label}-${sample.flightLevel}-${sample.point.latitude}-${sample.point.longitude}`}
                     className="border-b border-border/50"
                   >
                     <td className="px-2 py-2">{sample.label}</td>
@@ -95,38 +113,54 @@ export function EnrouteSection({
       </div>
 
       <div>
-        <h3 className="efb-label mb-2">Turbulence briefing</h3>
-        <div className="space-y-2">
-          {enroute.turbulence.map((item) => {
-            const style = TURBULENCE_STYLES[item.intensity];
+        <h3 className="efb-label mb-2">
+          Turbulence briefing · cruise ±4000 ft
+        </h3>
+        <div className="space-y-3">
+          {segments.map((segment) => {
+            const items = enroute.turbulence.filter(
+              (t) => t.segmentLabel === segment,
+            );
+            const ordered = ["below", "cruise", "above"].map(
+              (band) => items.find((t) => t.altitudeBand === band) ?? null,
+            );
             return (
               <article
-                key={item.segmentLabel}
+                key={segment}
                 className="rounded-md border border-border/60 bg-muted/30 px-3 py-3"
               >
-                <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <span
-                    className={cn(
-                      "inline-flex rounded border px-2 py-0.5 text-[11px] font-semibold",
-                      style.bg,
-                      style.text,
-                      style.border,
-                    )}
-                  >
-                    {TURBULENCE_LABELS[item.intensity]}
-                  </span>
-                  <span className="text-sm font-semibold">
-                    {item.segmentLabel}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {item.flightLevelBand} · {item.expectedDuration} ·{" "}
-                    {item.confidence} confidence
-                  </span>
+                <p className="mb-2 text-sm font-semibold">{segment}</p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {ordered.map((item) => {
+                    if (!item) return null;
+                    const style = TURBULENCE_STYLES[item.intensity];
+                    return (
+                      <div
+                        key={`${item.segmentLabel}-${item.altitudeBand}`}
+                        className="rounded border border-border/50 bg-background/40 px-2 py-2"
+                      >
+                        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+                              style.bg,
+                              style.text,
+                              style.border,
+                            )}
+                          >
+                            {TURBULENCE_LABELS[item.intensity]}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {item.flightLevelBand}
+                          </span>
+                        </div>
+                        <pre className="efb-mono whitespace-pre-wrap text-[11px] text-foreground/90">
+                          {item.pilotText}
+                        </pre>
+                      </div>
+                    );
+                  })}
                 </div>
-                <pre className="efb-mono mb-1 whitespace-pre-wrap text-foreground/90">
-                  {item.pilotText}
-                </pre>
-                <p className="text-xs text-muted-foreground">{item.notes}</p>
               </article>
             );
           })}
@@ -154,7 +188,7 @@ export function EnrouteSection({
           <h3 className="efb-label mb-2">SIGMETs</h3>
           {enroute.sigmets.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No SIGMETs matched the route corridor.
+              No SIGMETs matched the route corridor for the planned window.
             </p>
           ) : (
             <div className="space-y-3">

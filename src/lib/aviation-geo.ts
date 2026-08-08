@@ -85,3 +85,44 @@ export function neighboringPressureLevels(hpa: number): readonly number[] {
   const upper = available[Math.min(available.length - 1, index + 1)] ?? hpa;
   return Array.from(new Set([lower, hpa, upper]));
 }
+
+/**
+ * Cruise FL ± offset (default 40 = 4000 ft), clamped to jet FL envelope.
+ */
+export function cruiseAltitudeBands(
+  cruiseFl: number,
+  offsetFl: number,
+  minFl: number,
+  maxFl: number,
+): { readonly below: number; readonly cruise: number; readonly above: number } {
+  return {
+    below: Math.max(minFl, cruiseFl - offsetFl),
+    cruise: cruiseFl,
+    above: Math.min(maxFl, cruiseFl + offsetFl),
+  };
+}
+
+/** Estimate UTC time when a route sample is overflown. */
+export function estimateSampleTimeUtc(
+  departureTimeUtc: string,
+  distanceFromStartNm: number,
+  groundspeedKt: number,
+): string {
+  const etd = Date.parse(departureTimeUtc);
+  if (Number.isNaN(etd) || groundspeedKt <= 0) {
+    return departureTimeUtc;
+  }
+  const hours = distanceFromStartNm / groundspeedKt;
+  return new Date(etd + hours * 3_600_000).toISOString();
+}
+
+/** Format hour for Open-Meteo start_hour / end_hour (UTC). */
+export function toOpenMeteoHour(isoUtc: string): string {
+  const d = new Date(isoUtc);
+  if (Number.isNaN(d.getTime())) {
+    return new Date().toISOString().slice(0, 13) + ":00";
+  }
+  d.setUTCMinutes(0, 0, 0);
+  return `${d.toISOString().slice(0, 13)}:00`;
+}
+
