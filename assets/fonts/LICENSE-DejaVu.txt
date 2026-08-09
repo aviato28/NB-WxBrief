@@ -1,0 +1,7 @@
+DejaVu fonts — Bitstream Vera Copyright + Arev Fonts Copyright + public
+domain changes by the DejaVu project.
+
+These fonts are free to use, modify, and redistribute. Full license text:
+https://dejavu-fonts.github.io/License.html
+
+Bundled for NB-WxBrief PDF route-map labels on Linux/Vercel (no Helvetica).
