@@ -12,6 +12,7 @@ import {
   buildDispatchBullets,
   buildWaypointConditions,
 } from "@/services/weather/turbulence-briefing";
+import { buildCrewOnboardBrief } from "@/services/weather/crew-onboard-brief";
 
 export class BriefingError extends Error {
   readonly code:
@@ -153,6 +154,15 @@ export class BriefingService {
         route,
       });
 
+      const crewBrief = buildCrewOnboardBrief({
+        route,
+        turbulence: enrouteRaw.turbulence,
+        convective: enrouteRaw.convective,
+        departure: departureWeather,
+        destination: destinationWeather,
+        cruiseFlightLevel: request.flightLevel,
+      });
+
       const waypointConditions =
         enrouteRaw.waypointConditions.length > 0
           ? enrouteRaw.waypointConditions
@@ -166,6 +176,7 @@ export class BriefingService {
       const enroute = {
         ...enrouteRaw,
         dispatchBullets,
+        crewBrief,
         waypointConditions,
       };
 

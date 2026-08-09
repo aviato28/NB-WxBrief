@@ -603,6 +603,15 @@ export function buildMockEnrouteWeather(flightLevel: number): EnrouteWeather {
       "Destination MVFR with TEMPO IFR overnight.",
       "Alternate weather suitable with strong winds.",
     ],
+    crewBrief: {
+      headline: `KJFK → EGLL · about 7 hours · FL${flightLevel}`,
+      lines: [
+        "Climb and early cruise look smooth.",
+        "Around 2 and a half hours in — expect a bumpier ride for a stretch.",
+        "Descent into EGLL should be smooth.",
+        "Arrival into EGLL — a bit of weather at the field (MVFR); nothing dramatic, just brief the approach.",
+      ],
+    },
   };
 }
 
