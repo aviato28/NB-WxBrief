@@ -4,6 +4,7 @@ import { AlertCircle, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { AirportWeatherSection } from "@/components/briefing/airport-weather-section";
 import { BriefingToolbar } from "@/components/briefing/briefing-toolbar";
+import { CrewOnboardBriefSection } from "@/components/briefing/crew-onboard-brief-section";
 import { EnrouteSection } from "@/components/briefing/enroute-section";
 import { FlightSummaryPanel } from "@/components/briefing/flight-summary-panel";
 import { ThreatSummaryPanel } from "@/components/briefing/threat-summary-panel";
@@ -85,6 +86,8 @@ export function BriefingView({
         flightNumber={briefing.request.flightNumber}
         aircraftRegistration={briefing.request.aircraftRegistration}
       />
+
+      <CrewOnboardBriefSection brief={briefing.enroute.crewBrief} />
 
       <section className="efb-panel p-4 sm:p-5">
         <SectionHeader eyebrow="Dispatch" title="Operational weather summary" />

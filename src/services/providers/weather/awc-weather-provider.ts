@@ -38,6 +38,7 @@ import {
   buildTurbulenceBriefing,
   buildWaypointConditions,
 } from "@/services/weather/turbulence-briefing";
+import { buildCrewOnboardBrief } from "@/services/weather/crew-onboard-brief";
 
 const AWC_BASE = "https://aviationweather.gov/api/data";
 
@@ -285,6 +286,21 @@ export class AwcWeatherProvider implements WeatherProvider {
       route,
     });
 
+    const crewBrief = buildCrewOnboardBrief({
+      route,
+      turbulence:
+        turbulence.length > 0
+          ? turbulence
+          : [],
+      convective,
+      departure: stubWx,
+      destination: {
+        ...stubWx,
+        icao: query.destinationIcao as AirportWeather["icao"],
+      },
+      cruiseFlightLevel: cruiseFl,
+    });
+
     return {
       windsAloft: winds,
       turbulence:
@@ -312,6 +328,7 @@ export class AwcWeatherProvider implements WeatherProvider {
       sigmets,
       waypointConditions,
       dispatchBullets,
+      crewBrief,
     };
   }
 }

@@ -177,6 +177,13 @@ export interface EnrouteWeather {
   readonly sigmets: readonly Sigmet[];
   readonly waypointConditions: readonly WaypointCondition[];
   readonly dispatchBullets: readonly string[];
+  /** Short plain-language onboard brief for the crew. */
+  readonly crewBrief: CrewOnboardBrief;
+}
+
+export interface CrewOnboardBrief {
+  readonly headline: string;
+  readonly lines: readonly string[];
 }
 
 export type ThreatSeverity = "INFO" | "CAUTION" | "WARNING" | "CRITICAL";

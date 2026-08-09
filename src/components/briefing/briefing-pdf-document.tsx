@@ -906,6 +906,43 @@ export function BriefingPdfDocument({
 
           <View style={s.section}>
             <Section
+              title="Crew onboard brief"
+              hint="Plain-language ride call for the flight deck"
+            />
+            <View
+              style={{
+                borderWidth: 1,
+                borderColor: cyan,
+                backgroundColor: softAlt,
+                padding: 8,
+                marginBottom: 4,
+              }}
+              wrap={false}
+            >
+              <Text
+                style={{
+                  fontSize: 9,
+                  fontFamily: "Helvetica-Bold",
+                  color: ink,
+                  marginBottom: 5,
+                }}
+              >
+                {enroute.crewBrief.headline}
+              </Text>
+              {enroute.crewBrief.lines.map((line) => (
+                <View key={line} style={s.bullet} wrap={false}>
+                  <Text style={s.bulletMark}>•</Text>
+                  <Text style={s.bulletText}>{line}</Text>
+                </View>
+              ))}
+              <Text style={{ fontSize: 6, color: mute, marginTop: 4 }}>
+                Timed from filed route · assumed cruise groundspeed · advisory
+              </Text>
+            </View>
+          </View>
+
+          <View style={s.section}>
+            <Section
               title="1. Flight summary"
               hint={`${summary.alternate?.icao ? `ALTN ${summary.alternate.icao}` : "No alternate"} · ${briefing.dataMode.toUpperCase()}`}
             />
