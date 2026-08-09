@@ -161,6 +161,7 @@ export class BriefingService {
         departure: departureWeather,
         destination: destinationWeather,
         cruiseFlightLevel: request.flightLevel,
+        winds: enrouteRaw.windsAloft,
       });
 
       const waypointConditions =
