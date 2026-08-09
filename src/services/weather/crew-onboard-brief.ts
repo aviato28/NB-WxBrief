@@ -101,22 +101,34 @@ function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function categoryArrivalNote(
+/** Crew only cares about really low vis — under 1 km (≈ 0.62 SM). */
+const LOW_VISIBILITY_KM = 1;
+const LOW_VISIBILITY_SM = LOW_VISIBILITY_KM / 1.609344;
+
+function visibilitySmFromWeather(
   weather: AirportWeather | null,
+): number | null {
+  return weather?.metar?.visibilitySm ?? null;
+}
+
+/**
+ * Field weather for the crew brief: IFR/MVFR alone is fine.
+ * Only call out visibility under 1 km — no holding/divert language.
+ */
+function fieldVisibilityNote(
+  role: "Arrival" | "Departure",
   icao: string,
+  weather: AirportWeather | null,
 ): string | null {
-  const cat = weather?.metar?.flightCategory;
-  if (!cat) return null;
-  if (cat === "VFR") {
-    return `Arrival into ${icao} looks straightforward — VFR conditions at the field.`;
+  const sm = visibilitySmFromWeather(weather);
+  if (sm === null || sm >= LOW_VISIBILITY_SM) {
+    return null;
   }
-  if (cat === "MVFR") {
-    return `Arrival into ${icao} — a bit of weather at the field (MVFR); nothing dramatic, just brief the approach.`;
+  const meters = Math.max(100, Math.round(sm * 1609.344));
+  if (role === "Arrival") {
+    return `Arrival into ${icao} — visibility is low (about ${meters} m, under 1 km). Worth a careful brief for the approach.`;
   }
-  if (cat === "IFR") {
-    return `Arrival into ${icao} — IFR at the field. Expect weather on the approach and have holding/divert in mind.`;
-  }
-  return `Arrival into ${icao} — LIFR. Plan for a messy approach and protect fuel.`;
+  return `Departure from ${icao} — visibility is low (about ${meters} m, under 1 km). Expect a careful takeoff roll.`;
 }
 
 interface TurbStretch {
@@ -417,16 +429,14 @@ export function buildCrewOnboardBrief(input: {
     }
   }
 
-  const arrival = categoryArrivalNote(input.destination, dest);
+  const arrival = fieldVisibilityNote("Arrival", dest, input.destination);
   if (arrival) {
     lines.push(arrival);
   }
 
-  const depCat = input.departure.metar?.flightCategory;
-  if (depCat === "IFR" || depCat === "LIFR") {
-    lines.unshift(
-      `Departure from ${dep} is ${depCat} — expect weather on the takeoff roll / climb.`,
-    );
+  const departureVis = fieldVisibilityNote("Departure", dep, input.departure);
+  if (departureVis) {
+    lines.unshift(departureVis);
   }
 
   const trimmed = lines.slice(0, 7);
