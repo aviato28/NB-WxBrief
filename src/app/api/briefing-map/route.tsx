@@ -1,5 +1,10 @@
+import "./map-fontconfig";
+
+import { join } from "node:path";
+import { existsSync } from "node:fs";
 import sharp from "sharp";
 import type { NextRequest } from "next/server";
+import { MAP_FONT_DIR, MAP_FONT_FAMILY } from "./map-fontconfig";
 
 export const runtime = "nodejs";
 
@@ -63,8 +68,10 @@ function turbColor(intensity: string): string {
   }
 }
 
+/** Keep SVG text ASCII-safe for librsvg; escape XML specials. */
 function esc(text: string): string {
   return text
+    .replace(/[^\x20-\x7E]/g, "-")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
@@ -91,10 +98,16 @@ async function fetchTileBuffer(url: string): Promise<Buffer | null> {
 
 /**
  * Build the PDF route chart with sharp — tiles + a single SVG overlay.
- * Avoids next/og (Satori), which previously misaligned HTML/SVG layers so the
- * navy route and waypoint markers did not share the same screen positions.
+ * Waypoint names use bundled DejaVu via fontconfig (no Helvetica tofu on Vercel).
  */
 export async function POST(request: NextRequest): Promise<Response> {
+  if (
+    !existsSync(join(MAP_FONT_DIR, "DejaVuSans.ttf")) ||
+    !existsSync(join(MAP_FONT_DIR, "DejaVuSans-Bold.ttf"))
+  ) {
+    return new Response("Map fonts missing", { status: 500 });
+  }
+
   let body: MapRequestBody;
   try {
     body = (await request.json()) as MapRequestBody;
@@ -111,7 +124,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   const turbulence = body.turbulence ?? [];
   const sigmets = body.sigmets ?? [];
 
-  // Fit viewport to the union of path + labeled fixes so markers stay on-chart.
   const allPoints: MapPoint[] = [
     ...path,
     ...fixes.map((f) => ({ lat: f.lat, lon: f.lon })),
@@ -217,7 +229,6 @@ export async function POST(request: NextRequest): Promise<Response> {
   for (const tile of tiles) {
     const left = Math.round(tile.left);
     const top = Math.round(tile.top);
-    // Radar tiles: soft blend by reducing opacity via sharp ensureAlpha + linear.
     if (tile.opacity < 1) {
       const faded = await sharp(tile.buf)
         .ensureAlpha(tile.opacity)
@@ -229,7 +240,6 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
   }
 
-  // Draw route + markers in ONE SVG so path and points share the same pixel space.
   const projectedPath = path.map((p) => project(p.lat, p.lon));
   const routeD = projectedPath
     .map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
@@ -241,7 +251,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const sigmetPaths = sigmets
     .filter((s) => s.points.length >= 3)
-    .map((s, index) => {
+    .map((s) => {
       const d =
         s.points
           .map((p, i) => {
@@ -250,7 +260,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           })
           .join(" ") + " Z";
       const color = s.hazard === "CONVECTIVE" ? "#ea580c" : "#ca8a04";
-      return `<path key="s${index}" d="${d}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.5"/>`;
+      return `<path d="${d}" fill="${color}" fill-opacity="0.18" stroke="${color}" stroke-width="1.5"/>`;
     })
     .join("");
 
@@ -262,8 +272,10 @@ export async function POST(request: NextRequest): Promise<Response> {
     })
     .join("");
 
+  // Place labels with light collision avoidance so names stay readable.
+  const placedLabels: Array<{ x: number; y: number }> = [];
   const fixMarks = fixes
-    .map((fix) => {
+    .map((fix, index) => {
       const xy = project(fix.lat, fix.lon);
       const isEnd = endpoints.has(fix.name);
       const r = isEnd ? 7 : 5;
@@ -271,7 +283,22 @@ export async function POST(request: NextRequest): Promise<Response> {
       const shape = isEnd
         ? `<rect x="${(xy.x - r).toFixed(1)}" y="${(xy.y - r).toFixed(1)}" width="${r * 2}" height="${r * 2}" fill="${fill}" stroke="#0b1524" stroke-width="1.5"/>`
         : `<circle cx="${xy.x.toFixed(1)}" cy="${xy.y.toFixed(1)}" r="${r}" fill="${fill}" stroke="#0b1524" stroke-width="1.5"/>`;
-      const label = `<text x="${(xy.x + 10).toFixed(1)}" y="${(xy.y - 8).toFixed(1)}" fill="#0b1524" font-size="18" font-family="Helvetica, Arial, sans-serif" font-weight="700">${esc(fix.name)}</text>`;
+
+      // Alternate label side; nudge if overlapping a prior label.
+      let labelX = xy.x + 10;
+      let labelY = index % 2 === 0 ? xy.y - 10 : xy.y + 18;
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const clash = placedLabels.some(
+          (p) => Math.hypot(p.x - labelX, p.y - labelY) < 28,
+        );
+        if (!clash) break;
+        labelY += index % 2 === 0 ? -14 : 14;
+        labelX += 6;
+      }
+      placedLabels.push({ x: labelX, y: labelY });
+
+      // Haloed text so names read on busy basemap tiles.
+      const label = `<text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" fill="#0b1524" stroke="#ffffff" stroke-width="4" paint-order="stroke" stroke-linejoin="round" font-size="17" font-family="${MAP_FONT_FAMILY}" font-weight="700">${esc(fix.name)}</text>`;
       return `${shape}${label}`;
     })
     .join("");
@@ -283,9 +310,9 @@ export async function POST(request: NextRequest): Promise<Response> {
   <path d="${routeD}" fill="none" stroke="#0b4f8a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
   ${turbCircles}
   ${fixMarks}
-  <rect x="16" y="${HEIGHT - 70}" width="520" height="54" rx="4" fill="white" fill-opacity="0.92"/>
-  <text x="28" y="${HEIGHT - 42}" fill="#334155" font-size="16" font-family="Helvetica, Arial, sans-serif">NB-WxBrief · CARTO basemap · filed route</text>
-  <text x="28" y="${HEIGHT - 22}" fill="#64748b" font-size="14" font-family="Helvetica, Arial, sans-serif">Cyan/amber markers = waypoints · colored dots = turbulence (advisory)</text>
+  <rect x="16" y="${HEIGHT - 70}" width="560" height="54" rx="4" fill="white" fill-opacity="0.94"/>
+  <text x="28" y="${HEIGHT - 42}" fill="#334155" font-size="15" font-family="${MAP_FONT_FAMILY}">NB-WxBrief - CARTO basemap - filed route</text>
+  <text x="28" y="${HEIGHT - 22}" fill="#64748b" font-size="13" font-family="${MAP_FONT_FAMILY}">Cyan/amber markers = waypoints with names - colored dots = turbulence</text>
 </svg>`);
 
   composites.push({ input: overlaySvg, left: 0, top: 0 });

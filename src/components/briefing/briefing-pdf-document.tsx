@@ -1036,11 +1036,11 @@ export function BriefingPdfDocument({
                 <Image src={mapImageDataUrl} style={s.mapImage} />
                 <View style={s.mapFooter}>
                   <Text style={s.mapFooterText}>
-                    CARTO basemap · filed route · cyan waypoints · turb dots by
+                    CARTO basemap - filed route - cyan waypoints - turb dots by
                     intensity (advisory)
                   </Text>
                   <Text style={s.mapFooterText}>
-                    {Math.round(summary.routeDistanceNm).toLocaleString()} NM ·{" "}
+                    {Math.round(summary.routeDistanceNm).toLocaleString()} NM -{" "}
                     {briefing.route.fixes.length} waypoints
                   </Text>
                 </View>
