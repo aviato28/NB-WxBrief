@@ -31,8 +31,9 @@ export function CrewOnboardBriefSection({
         ))}
       </ul>
       <p className="mt-3 text-[11px] text-muted-foreground">
-        Plain-language ride call — timed from filed route and assumed cruise
-        groundspeed. Not a substitute for SIGMETs, PIREPs, or company guidance.
+        A320-family timing (~430 kt planning GS, wind-biased when samples
+        exist). Chop duration from enroute wind/shear samples along the filed
+        route — advisory only, not a substitute for SIGMETs/PIREPs.
       </p>
     </section>
   );

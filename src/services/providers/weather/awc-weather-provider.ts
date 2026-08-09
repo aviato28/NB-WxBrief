@@ -288,10 +288,7 @@ export class AwcWeatherProvider implements WeatherProvider {
 
     const crewBrief = buildCrewOnboardBrief({
       route,
-      turbulence:
-        turbulence.length > 0
-          ? turbulence
-          : [],
+      turbulence: turbulence.length > 0 ? turbulence : [],
       convective,
       departure: stubWx,
       destination: {
@@ -299,6 +296,7 @@ export class AwcWeatherProvider implements WeatherProvider {
         icao: query.destinationIcao as AirportWeather["icao"],
       },
       cruiseFlightLevel: cruiseFl,
+      winds,
     });
 
     return {

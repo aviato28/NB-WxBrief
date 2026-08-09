@@ -936,7 +936,8 @@ export function BriefingPdfDocument({
                 </View>
               ))}
               <Text style={{ fontSize: 6, color: mute, marginTop: 4 }}>
-                Timed from filed route · assumed cruise groundspeed · advisory
+                A320-family timing (~430 kt) · duration from route wind/shear
+                samples · advisory
               </Text>
             </View>
           </View>
