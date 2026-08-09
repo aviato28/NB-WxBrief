@@ -610,7 +610,6 @@ export function buildMockEnrouteWeather(flightLevel: number): EnrouteWeather {
         "Around 2 and a half hours in — light chop for about 15 minutes.",
         "Around 4 hours in — expect a bumpier ride for about 30 minutes.",
         "Descent into EGLL should be smooth.",
-        "Arrival into EGLL — a bit of weather at the field (MVFR); nothing dramatic, just brief the approach.",
       ],
     },
   };
